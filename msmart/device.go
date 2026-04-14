@@ -1,4 +1,4 @@
-// Package msmart_ng_go provides Go implementation of msmart-ng base device
+// Package msmart provides Go implementation of msmart-ng base device
 package msmart
 
 import (
@@ -109,6 +109,41 @@ func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 	}
 
 	return responses, nil
+}
+
+// SendBytes sends raw bytes to the device and returns any responses
+// This is used by sub-packages that have their own command serialization
+func (d *Device) SendBytes(data []byte) ([][]byte, error) {
+	deviceLogger.Printf("DEBUG: Sending bytes to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
+
+	start := time.Now()
+	responses, err := d.lan.Send(data, Retries)
+	if err != nil {
+		if _, ok := err.(*ProtocolError); ok {
+			deviceLogger.Printf("ERROR: Network error %s:%d: %v", d.ip, d.port, err)
+			return nil, err
+		}
+	}
+
+	responseTime := time.Since(start).Seconds()
+
+	if len(responses) == 0 {
+		deviceLogger.Printf("WARNING: No response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
+	} else {
+		deviceLogger.Printf("DEBUG: Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
+	}
+
+	return responses, nil
+}
+
+// SetOnline sets the online status
+func (d *Device) SetOnline(online bool) {
+	d.online = online
+}
+
+// SetSupported sets the supported status
+func (d *Device) SetSupported(supported bool) {
+	d.supported = supported
 }
 
 // Refresh refreshes the device state

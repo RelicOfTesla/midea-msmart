@@ -7,9 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 
-	msmart "midea-go/pkg/msmart_ng_go"
+	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
 
 // Logger for the package
@@ -473,86 +472,22 @@ func (cm *CapabilityManager) SetFlags(flags Capability) {
 	cm.flags = flags
 }
 
-// Device represents a base device.
-// In Python: class Device()
-// This is a minimal implementation for the CC package since msmart.Device is not available.
-type Device struct {
-	ip        string
-	port      int
-	id        int
-	online    bool
-	supported bool
-	lan       *msmart.LAN
-	mu        sync.Mutex
-}
-
-// NewDevice creates a new Device instance.
-func NewDevice(ip string, deviceID int, port int) *Device {
-	return &Device{
-		ip:        ip,
-		port:      port,
-		id:        deviceID,
-		lan:       msmart.NewLAN(ip, port, int64(deviceID)),
-		online:    false,
-		supported: false,
-	}
-}
-
-// GetID returns the device ID.
-func (d *Device) GetID() int {
-	return d.id
-}
-
-// GetIP returns the device IP.
-func (d *Device) GetIP() string {
-	return d.ip
-}
-
-// GetPort returns the device port.
-func (d *Device) GetPort() int {
-	return d.port
-}
-
-// GetOnline returns whether the device is online.
-func (d *Device) GetOnline() bool {
-	return d.online
-}
-
-// SetOnline sets the online status.
-func (d *Device) SetOnline(online bool) {
-	d.online = online
-}
-
-// GetSupported returns whether the device is supported.
-func (d *Device) GetSupported() bool {
-	return d.supported
-}
-
-// SetSupported sets the supported status.
-func (d *Device) SetSupported(supported bool) {
-	d.supported = supported
-}
-
-// GetLAN returns the LAN connection.
-func (d *Device) GetLAN() *msmart.LAN {
-	return d.lan
-}
-
-// ToDict returns the device as a dictionary.
-func (d *Device) ToDict() map[string]interface{} {
-	return map[string]interface{}{
-		"ip":        d.ip,
-		"port":      d.port,
-		"id":        d.id,
-		"online":    d.online,
-		"supported": d.supported,
-	}
-}
+// Note: Device is now embedded from msmart.Device instead of being defined locally.
+// This follows the correct inheritance pattern matching the Python implementation.
 
 // CommercialAirConditioner represents a commercial air conditioner device.
 // In Python: class CommercialAirConditioner(Device)
 type CommercialAirConditioner struct {
-	*Device
+	*msmart.Device
+
+	// Local LAN connection for sending commands
+	// (msmart.Device's LAN is private, so we maintain our own)
+	lan *msmart.LAN
+
+	// Local online/supported status tracking
+	// (msmart.Device's fields are private, so we track locally)
+	online    bool
+	supported bool
 
 	// Basic controls
 	powerState         bool
@@ -595,7 +530,10 @@ type CommercialAirConditioner struct {
 // In Python: def __init__(self, ip: str, device_id: int, port: int, **kwargs)
 func NewCommercialAirConditioner(ip string, deviceID int, port int) *CommercialAirConditioner {
 	ac := &CommercialAirConditioner{
-		Device: NewDevice(ip, deviceID, port),
+		Device:    msmart.NewDevice(ip, port, deviceID, msmart.DeviceTypeCommercialAC),
+		lan:       msmart.NewLAN(ip, port, int64(deviceID)),
+		online:    false,
+		supported: false,
 
 		// Basic controls
 		powerState:         false,
@@ -811,7 +749,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 		}
 
 		// Send command using the device's LAN connection
-		resp, err := ac.GetLAN().Send(data, DefaultSendRetries)
+		resp, err := ac.Device.SendBytes(data)
 		if err != nil {
 			logger.Error("Failed to send command", "error", err)
 			continue
@@ -820,7 +758,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 	}
 
 	// Device is online if any response received
-	ac.SetOnline(len(responses) > 0)
+	ac.Device.SetOnline(len(responses) > 0)
 
 	var validResponses []interface{}
 	for _, data := range responses {
@@ -836,7 +774,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 
 	// Device is supported if we can process any response
 	if ac.GetOnline() && len(validResponses) > 0 {
-		ac.SetSupported(true)
+		ac.Device.SetSupported(true)
 	}
 
 	return validResponses, nil
@@ -1341,6 +1279,11 @@ func (ac *CommercialAirConditioner) SetAuxMode(mode AuxHeatMode) {
 func (ac *CommercialAirConditioner) ToDict() map[string]interface{} {
 	result := ac.Device.ToDict()
 
+	// Override online/supported with our local tracking
+	// (since we can't modify msmart.Device's private fields)
+	result["online"] = ac.online
+	result["supported"] = ac.supported
+
 	result["power"] = ac.GetPowerState()
 	result["target_temperature"] = ac.GetTargetTemperature()
 	result["indoor_temperature"] = ac.GetIndoorTemperature()
@@ -1402,20 +1345,3 @@ func (ac *CommercialAirConditioner) CapabilitiesDict() map[string]interface{} {
 	}
 }
 
-// Helper methods for LAN access
-// These are needed because Device's LAN is private
-
-// GetLAN returns the LAN connection for the device.
-func (ac *CommercialAirConditioner) GetLAN() *msmart.LAN {
-	return ac.Device.lan
-}
-
-// SetOnline sets the online status.
-func (ac *CommercialAirConditioner) SetOnline(online bool) {
-	ac.Device.online = online
-}
-
-// SetSupported sets the supported status.
-func (ac *CommercialAirConditioner) SetSupported(supported bool) {
-	ac.Device.supported = supported
-}

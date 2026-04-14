@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math"
 
-	msmart "midea-go/pkg/msmart_ng_go"
+	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
 
 // InvalidResponseException represents an error for invalid responses

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	msmart "midea-go/pkg/msmart_ng_go"
+	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
 
 // FanSpeed represents fan speed enum
@@ -1008,19 +1008,104 @@ func (ac *AirConditioner) updateSupportedProperties() {
 // sendCommandsGetResponses sends a list of commands and returns all valid responses
 // This is the Go equivalent of Python's _send_commands_get_responses method
 func (ac *AirConditioner) sendCommandsGetResponses(ctx context.Context, commands []CommandInterface) ([]ResponseInterface, error) {
-	// TODO: Implement actual command sending
-	// This is a placeholder for the translation
+	var allResponses []ResponseInterface
 
-	return nil, fmt.Errorf("not implemented")
+	for _, cmd := range commands {
+		// Get command bytes
+		var data []byte
+		if c, ok := cmd.(interface{ ToBytes() []byte }); ok {
+			data = c.ToBytes()
+		} else {
+			continue
+		}
+
+		// Send command
+		responses, err := ac.Device.SendBytes(data)
+		if err != nil {
+			return nil, err
+		}
+
+		// Device is online if any response received
+		ac.Device.SetOnline(len(responses) > 0)
+
+		// Parse responses
+		for _, respData := range responses {
+			response, err := ConstructResponse(respData)
+			if err != nil {
+				slog.Debug("Failed to construct response", "error", err, "data", respData)
+				continue
+			}
+			allResponses = append(allResponses, response)
+		}
+	}
+
+	// Device is supported if online and any supported response is received
+	ac.Device.SetSupported(ac.Device.GetOnline() && len(allResponses) > 0)
+
+	return allResponses, nil
+}
+
+// sendCommandGetResponseWithClass sends a command and returns the first response of the requested class
+func (ac *AirConditioner) sendCommandGetResponseWithClass(ctx context.Context, command CommandInterface, responseClass ResponseId) (ResponseInterface, error) {
+	responses, err := ac.sendCommandsGetResponses(ctx, []CommandInterface{command})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, response := range responses {
+		if response.ID() == byte(responseClass) {
+			return response, nil
+		}
+		slog.Debug("Ignored response of unexpected type", "id", ac.GetID(), "response", response)
+	}
+
+	return nil, nil
 }
 
 // GetCapabilities fetches the device capabilities
 // This is the Go equivalent of Python's get_capabilities method
 func (ac *AirConditioner) GetCapabilities(ctx context.Context) error {
-	// TODO: Implement actual capabilities fetching
-	// This is a placeholder for the translation
+	// Send capabilities request and get a response
+	cmd := NewGetCapabilitiesCommand(false)
+	response, err := ac.sendCommandGetResponseWithClass(ctx, cmd, ResponseIdCapabilities)
+	if err != nil {
+		return fmt.Errorf("failed to query capabilities: %w", err)
+	}
+	if response == nil {
+		return fmt.Errorf("failed to query capabilities from device %d", ac.GetID())
+	}
 
-	return fmt.Errorf("not implemented")
+	capsResponse, ok := response.(*CapabilitiesResponse)
+	if !ok {
+		return fmt.Errorf("unexpected response type for capabilities")
+	}
+
+	slog.Debug("Capabilities response payload from device", "id", ac.GetID(), "response", capsResponse)
+	slog.Debug("Raw capabilities", "id", ac.GetID(), "capabilities", capsResponse.RawCapabilities())
+
+	// Send 2nd capabilities request if needed
+	if capsResponse.AdditionalCapabilities() {
+		cmd := NewGetCapabilitiesCommand(true)
+		additionalResponse, err := ac.sendCommandGetResponseWithClass(ctx, cmd, ResponseIdCapabilities)
+		if err != nil {
+			slog.Warn("Failed to query additional capabilities from device", "id", ac.GetID(), "error", err)
+		} else if additionalResponse != nil {
+			addCapsResponse, ok := additionalResponse.(*CapabilitiesResponse)
+			if ok {
+				slog.Debug("Additional capabilities response payload from device", "id", ac.GetID(), "response", addCapsResponse)
+				// Merge additional capabilities
+				capsResponse.Merge(addCapsResponse)
+				slog.Debug("Merged raw capabilities", "id", ac.GetID(), "capabilities", capsResponse.RawCapabilities())
+			}
+		} else {
+			slog.Warn("Failed to query additional capabilities from device", "id", ac.GetID())
+		}
+	}
+
+	// Update device capabilities
+	ac.updateCapabilities(capsResponse)
+
+	return nil
 }
 
 // ToggleDisplay toggles the device display if the device supports it
@@ -1048,10 +1133,42 @@ func (ac *AirConditioner) StartSelfClean(ctx context.Context) error {
 // Refresh refreshes the local copy of the device state by sending a GetState command
 // This is the Go equivalent of Python's refresh method
 func (ac *AirConditioner) Refresh(ctx context.Context) error {
-	// TODO: Implement actual refresh
-	// This is a placeholder for the translation
+	var commands []CommandInterface
 
-	return fmt.Errorf("not implemented")
+	// Always request state updates
+	commands = append(commands, NewGetStateCommand())
+
+	// Fetch power stats if supported
+	if ac.requestEnergyUsage {
+		commands = append(commands, NewGetEnergyUsageCommand())
+	}
+
+	// Request Group 5 data if humidity is supported or otherwise enabled
+	if ac.SupportsHumidity() || ac.requestGroup5Data {
+		commands = append(commands, NewGetGroup5Command())
+	}
+
+	// Update supported properties
+	if len(ac.supportedProperties) > 0 {
+		var props []PropertyId
+		for prop := range ac.supportedProperties {
+			props = append(props, prop)
+		}
+		commands = append(commands, NewGetPropertiesCommand(props))
+	}
+
+	// Send all commands and collect responses
+	responses, err := ac.sendCommandsGetResponses(ctx, commands)
+	if err != nil {
+		return err
+	}
+
+	// Update state from responses
+	for _, response := range responses {
+		ac.updateState(response)
+	}
+
+	return nil
 }
 
 // applyProperties applies the provided properties to the device
@@ -1067,9 +1184,20 @@ func (ac *AirConditioner) applyProperties(ctx context.Context, properties map[Pr
 	// Always add buzzer property
 	properties[PropertyIdBuzzer] = ac.beepOn
 
-	// TODO: Build command with properties and send
+	// Build command with properties
+	cmd := NewSetPropertiesCommand(properties)
 
-	return fmt.Errorf("not implemented")
+	// Send command and update state
+	responses, err := ac.sendCommandsGetResponses(ctx, []CommandInterface{cmd})
+	if err != nil {
+		return err
+	}
+
+	for _, response := range responses {
+		ac.updateState(response)
+	}
+
+	return nil
 }
 
 // Apply applies the local state to the device
@@ -1108,9 +1236,70 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 		slog.Warn("Device is not capable of aux mode", "mode", ac.auxMode)
 	}
 
-	// TODO: Build and send SetStateCommand
+	// Build SetStateCommand
+	cmd := NewSetStateCommand()
+	cmd.BeepOn = ac.beepOn
+	cmd.PowerOn = ptrToVal(ac.powerState, false)
+	cmd.TargetTemperature = ac.targetTemperature
+	cmd.OperationalMode = byte(ac.operationalMode)
 
-	return fmt.Errorf("not implemented")
+	// Handle fan speed - could be FanSpeed or int
+	switch fs := ac.fanSpeed.(type) {
+	case FanSpeed:
+		cmd.FanSpeed = byte(fs)
+	case int:
+		cmd.FanSpeed = byte(fs)
+	case byte:
+		cmd.FanSpeed = fs
+	default:
+		cmd.FanSpeed = byte(FanSpeedAuto)
+	}
+
+	cmd.SwingMode = byte(ac.swingMode)
+	cmd.Eco = ac.eco
+	cmd.Turbo = ac.turbo
+	cmd.FreezeProtection = ac.freezeProtection
+	cmd.Sleep = ac.sleep
+	cmd.Fahrenheit = ac.fahrenheitUnit
+	cmd.FollowMe = ac.followMe
+	cmd.Purifier = ac.purifier
+	cmd.TargetHumidity = byte(ac.targetHumidity)
+	cmd.AuxHeat = ac.auxMode == AuxHeatModeAuxHeat
+	cmd.IndependentAuxHeat = ac.auxMode == AuxHeatModeAuxOnly
+
+	// Process any state responses from the device
+	responses, err := ac.sendCommandsGetResponses(ctx, []CommandInterface{cmd})
+	if err != nil {
+		return err
+	}
+
+	for _, response := range responses {
+		ac.updateState(response)
+	}
+
+	// Done if no properties need updating
+	if len(ac.updatedProperties) == 0 {
+		return nil
+	}
+
+	// Build property map from updated properties using propertyMap
+	props := make(map[PropertyId]interface{})
+	for prop := range ac.updatedProperties {
+		if val, ok := ac.getPropertyValue(prop); ok {
+			props[prop] = val
+		}
+	}
+
+	// Apply new properties
+	err = ac.applyProperties(ctx, props)
+	if err != nil {
+		return err
+	}
+
+	// Reset updated properties set
+	ac.updatedProperties = make(map[PropertyId]bool)
+
+	return nil
 }
 
 // OverrideCapabilities overrides device capabilities via serialized dict
@@ -1908,6 +2097,35 @@ func (ac *AirConditioner) RealTimePowerUsage() *float64 {
 		format = EnergyDataFormatBinary
 	}
 	return ac.GetRealTimePowerUsage(format)
+}
+
+// ============================================================================
+// Property Map
+// ============================================================================
+
+// propertyMap defines the mapping from PropertyId to a function that returns the property value
+// This is the Go equivalent of Python's _PROPERTY_MAP
+var propertyMap = map[PropertyId]func(*AirConditioner) interface{}{
+	PropertyIdBreezeAway:    func(ac *AirConditioner) interface{} { return ac.breezeMode == BreezeModeBreezeAway },
+	PropertyIdBreezeControl: func(ac *AirConditioner) interface{} { return ac.breezeMode },
+	PropertyIdBreezeless:    func(ac *AirConditioner) interface{} { return ac.breezeMode == BreezeModeBreezeless },
+	PropertyIdCascade:       func(ac *AirConditioner) interface{} { return ac.cascadeMode },
+	PropertyIdIECO:          func(ac *AirConditioner) interface{} { return ac.ieco },
+	PropertyIdJetCool:       func(ac *AirConditioner) interface{} { return ac.flashCool },
+	PropertyIdOutSilent:     func(ac *AirConditioner) interface{} { return ac.outSilent },
+	PropertyIdRateSelect:    func(ac *AirConditioner) interface{} { return ac.rateSelect },
+	PropertyIdSwingLrAngle:  func(ac *AirConditioner) interface{} { return ac.horizontalSwingAngle },
+	PropertyIdSwingUdAngle:  func(ac *AirConditioner) interface{} { return ac.verticalSwingAngle },
+}
+
+// getPropertyValue returns the current value of a property
+// This is a helper method that uses propertyMap to get property values
+func (ac *AirConditioner) getPropertyValue(prop PropertyId) (interface{}, bool) {
+	fn, ok := propertyMap[prop]
+	if !ok {
+		return nil, false
+	}
+	return fn(ac), true
 }
 
 // ============================================================================

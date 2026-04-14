@@ -1,0 +1,7 @@
+*.exe
+/midea-test
+/midea
+/pkg
+/cmd
+/msmart/TODO.md
+/DEVELOPMENT_PLAN.md
