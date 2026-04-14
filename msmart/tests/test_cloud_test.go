@@ -283,8 +283,14 @@ func TestSmartHomeCloud_GetTokenException(t *testing.T) {
 func TestSmartHomeCloud_ConnectException(t *testing.T) {
 	skipIfCI(t)
 
+	account := os.Getenv("MIDEA_ACCOUNT")
+	password := os.Getenv("MIDEA_PASSWORD")
+	if account == "" || password == "" {
+		t.Skip("Skipping: requires MIDEA_ACCOUNT and MIDEA_PASSWORD environment variables")
+	}
+
 	// Create a client with a custom HTTP client that will fail
-	client, err := msmart.NewSmartHomeCloud(msmart.DefaultCloudRegion, nil, nil, false, func() *http.Client {
+	client, err := msmart.NewSmartHomeCloud(msmart.DefaultCloudRegion, &account, &password, false, func() *http.Client {
 		return &http.Client{
 			Timeout: 1, // Very short timeout to force failure
 		}
