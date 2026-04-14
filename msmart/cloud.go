@@ -254,6 +254,16 @@ func (bc *BaseCloud) getLoginID() (string, error) {
 	return loginID, nil
 }
 
+// GetSession returns the current session.
+func (bc *BaseCloud) GetSession() map[string]interface{} {
+	return bc.session
+}
+
+// SetBaseURL sets the base URL for the cloud.
+func (bc *BaseCloud) SetBaseURL(url string) {
+	bc.baseURL = url
+}
+
 // GetToken gets token and key for the provided udpid.
 func (bc *BaseCloud) GetToken(udpid string) (string, string, error) {
 	response, err := bc.apiRequest(
@@ -600,6 +610,11 @@ func (shc *SmartHomeCloud) Login(force bool) error {
 	return nil
 }
 
+// GetAccessToken returns the access token.
+func (shc *SmartHomeCloud) GetAccessToken() string {
+	return shc.accessToken
+}
+
 // GetProtocolLua fetches and decodes the protocol Lua file.
 func (shc *SmartHomeCloud) GetProtocolLua(deviceType DeviceType, sn string) (string, string, error) {
 	encryptedSn, err := shc.security.EncryptAESAppKey([]byte(sn))
@@ -927,6 +942,11 @@ func (nhpc *NetHomePlusCloud) Login(force bool) error {
 	nhpc.sessionID = sessionID
 
 	return nil
+}
+
+// GetSessionID returns the session ID.
+func (nhpc *NetHomePlusCloud) GetSessionID() string {
+	return nhpc.sessionID
 }
 
 // GetProtocolLua fetches and decodes the protocol Lua file.

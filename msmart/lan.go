@@ -1036,7 +1036,12 @@ func SecurityEncryptAES(data []byte) ([]byte, error) {
 
 // SecuritySign signs data with MD5
 func SecuritySign(data []byte) []byte {
-	hash := md5.Sum(append(data, SecuritySignKey...))
+	// Create a new slice to avoid modifying the original data
+	// when append is used on a slice with extra capacity
+	combined := make([]byte, 0, len(data)+len(SecuritySignKey))
+	combined = append(combined, data...)
+	combined = append(combined, SecuritySignKey...)
+	hash := md5.Sum(combined)
 	return hash[:]
 }
 
