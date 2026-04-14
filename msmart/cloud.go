@@ -9,6 +9,7 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -434,7 +436,9 @@ func (s *SmartHomeCloudSecurity) DecryptAESAppKey(data []byte) ([]byte, error) {
 // NewSmartHomeCloud creates a new SmartHomeCloud instance
 func NewSmartHomeCloud(region string, account *string, password *string, useChinaServer bool, getAsyncClient func() *http.Client) (*SmartHomeCloud, error) {
 	// Allow override China server from environment
-	// In Go, we'd need to check os.Getenv("MIDEA_CHINA_SERVER")
+	if os.Getenv("MIDEA_CHINA_SERVER") == "1" {
+		useChinaServer = true
+	}
 
 	baseURL := "https://mp-prod.appsmb.com"
 	if useChinaServer {
@@ -944,11 +948,11 @@ func generateTokenHex(n int) string {
 	return hex.EncodeToString(b)[:n*2]
 }
 
-// generateTokenURLSafe generates a URL-safe random string
+// generateTokenURLSafe generates a URL-safe random string (base64 URL-safe encoding)
 func generateTokenURLSafe(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
-	return hex.EncodeToString(b)
+	return base64.URLEncoding.EncodeToString(b)
 }
 
 // pkcs7Pad pads data using PKCS7
