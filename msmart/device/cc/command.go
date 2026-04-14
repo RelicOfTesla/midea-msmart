@@ -6,8 +6,16 @@ package cc
 import (
 	"encoding/binary"
 	"fmt"
+	"sync"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
+)
+
+// Package-level message ID counter (like Python class variable)
+// Thread-safe with mutex
+var (
+	messageID    int
+	messageIDMux sync.Mutex
 )
 
 // InvalidResponseException represents an error for invalid responses
@@ -90,18 +98,27 @@ func (c ControlId) Encode(args ...interface{}) []byte {
 
 // Command is the base class for CC commands.
 // In Python: class Command(Frame)
+// Note: messageID is now a package-level variable (like Python class variable)
 type Command struct {
 	*msmart.Frame
-	messageID int
 }
 
 // NewCommand creates a new Command instance.
 // In Python: def __init__(self, frame_type: FrameType)
 func NewCommand(frameType msmart.FrameType) *Command {
 	return &Command{
-		Frame:     msmart.NewFrame(msmart.DeviceTypeCommercialAC, frameType),
-		messageID: 0,
+		Frame: msmart.NewFrame(msmart.DeviceTypeCommercialAC, frameType),
 	}
+}
+
+// nextMessageID generates next message ID (thread-safe).
+// In Python: def _next_message_id(self) -> int
+// This uses package-level messageID (like Python class variable)
+func nextMessageID() int {
+	messageIDMux.Lock()
+	defer messageIDMux.Unlock()
+	messageID++
+	return messageID & 0xFF
 }
 
 // ToBytes converts command to bytes with payload.
@@ -109,22 +126,14 @@ func NewCommand(frameType msmart.FrameType) *Command {
 func (c *Command) ToBytes(data []byte) []byte {
 	// Append message ID to payload
 	// TODO Message ID in reference is just a random value
-	c.messageID++
-	messageID := c.messageID & 0xFF
-	payload := append(data, byte(messageID))
+	msgID := nextMessageID()
+	payload := append(data, byte(msgID))
 
 	// Append CRC
 	crc := msmart.CalculateCRC8(payload)
 	payload = append(payload, crc)
 
 	return c.Frame.ToBytes(payload)
-}
-
-// nextMessageID generates next message ID.
-// In Python: def _next_message_id(self) -> int
-func (c *Command) nextMessageID() int {
-	c.messageID++
-	return c.messageID & 0xFF
 }
 
 // QueryCommand is a command to query state of the device.
@@ -265,14 +274,21 @@ func ConstructResponse(frame []byte) (interface{}, error) {
 	// Build the response
 	switch msmart.FrameType(frameType) {
 	case msmart.FrameTypeQuery, msmart.FrameTypeReport:
-		responseClass = NewQueryResponse(frame[10 : len(frame)-1])
+		resp, err := NewQueryResponse(frame[10 : len(frame)-1])
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
 	case msmart.FrameTypeControl:
-		responseClass = NewControlResponse(frame[10 : len(frame)-1])
+		resp, err := NewControlResponse(frame[10 : len(frame)-1])
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
 	default:
 		responseClass = NewResponse(frame[10 : len(frame)-1])
+		return responseClass, nil
 	}
-
-	return responseClass, nil
 }
 
 // QueryResponse is a response to query command.
@@ -323,7 +339,7 @@ type QueryResponse struct {
 
 // NewQueryResponse creates a new QueryResponse instance.
 // In Python: def __init__(self, payload: memoryview)
-func NewQueryResponse(payload []byte) *QueryResponse {
+func NewQueryResponse(payload []byte) (*QueryResponse, error) {
 	r := &QueryResponse{
 		Response: NewResponse(payload),
 		
@@ -342,8 +358,10 @@ func NewQueryResponse(payload []byte) *QueryResponse {
 		TargetTemperatureMin: 17,
 		TargetTemperatureMax: 30,
 	}
-	r.parse(payload)
-	return r
+	if err := r.parse(payload); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // parseTemperature parses a temperature value.
@@ -354,7 +372,7 @@ func (r *QueryResponse) parseTemperature(data byte) float64 {
 
 // parse parses the query response payload.
 // In Python: def _parse(self, payload: memoryview) -> None
-func (r *QueryResponse) parse(payload []byte) {
+func (r *QueryResponse) parse(payload []byte) error {
 	// Query response starts with an 8 byte header
 	// 0x01 - Basic data set
 	// 0xFE - Indicates format of data
@@ -365,12 +383,12 @@ func (r *QueryResponse) parse(payload []byte) {
 
 	// Validate header
 	if len(payload) < 2 || payload[0] != 0x01 || payload[1] != 0xFE {
-		panic(NewInvalidResponseException(
-			fmt.Sprintf("Query response payload '%x' lacks expected header 0x01FE.", payload)))
+		return NewInvalidResponseException(
+			fmt.Sprintf("Query response payload '%x' lacks expected header 0x01FE.", payload))
 	}
 
 	if len(payload) < 88 {
-		return
+		return nil
 	}
 
 	r.PowerOn = payload[8] != 0
@@ -423,6 +441,8 @@ func (r *QueryResponse) parse(payload []byte) {
 
 	// Aux mode: 0 - Auto, 1 - On, 2 - Off, 4 - "Separate"
 	r.AuxMode = payload[87]
+
+	return nil
 }
 
 // ParseCapabilities parses capabilities from the query response payload.
@@ -489,24 +509,26 @@ type ControlResponse struct {
 
 // NewControlResponse creates a new ControlResponse instance.
 // In Python: def __init__(self, payload: memoryview)
-func NewControlResponse(payload []byte) *ControlResponse {
+func NewControlResponse(payload []byte) (*ControlResponse, error) {
 	r := &ControlResponse{
 		Response: NewResponse(payload),
 		states:   make(map[ControlId]interface{}),
 	}
-	r.parse(payload)
-	return r
+	if err := r.parse(payload); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // parse parses the control response payload.
 // In Python: def _parse(self, payload: memoryview) -> None
-func (r *ControlResponse) parse(payload []byte) {
+func (r *ControlResponse) parse(payload []byte) error {
 	// Clear existing states
 	r.states = make(map[ControlId]interface{})
 
 	if len(payload) < 6 {
-		panic(NewInvalidResponseException(
-			fmt.Sprintf("Control response payload '%x' is too short.", payload)))
+		return NewInvalidResponseException(
+			fmt.Sprintf("Control response payload '%x' is too short.", payload))
 	}
 
 	// Loop through each entry
@@ -543,6 +565,8 @@ func (r *ControlResponse) parse(payload []byte) {
 		}
 		payload = payload[4+int(size):]
 	}
+
+	return nil
 }
 
 // GetControlState gets a control state by ID.

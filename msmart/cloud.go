@@ -429,8 +429,8 @@ func (s *SmartHomeCloudSecurity) DecryptAESAppKey(data []byte) ([]byte, error) {
 	mode := cipher.NewCBCDecrypter(block, iv)
 	mode.CryptBlocks(plaintext, data)
 
-	// Unpad
-	return pkcs7Unpad(plaintext), nil
+	// Unpad with proper error handling
+	return pkcs7Unpad(plaintext)
 }
 
 // NewSmartHomeCloud creates a new SmartHomeCloud instance
@@ -962,11 +962,25 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 	return append(data, padtext...)
 }
 
-// pkcs7Unpad removes PKCS7 padding
-func pkcs7Unpad(data []byte) []byte {
-	length := len(data)
-	unpadding := int(data[length-1])
-	return data[:(length - unpadding)]
+// pkcs7Unpad removes PKCS7 padding with proper validation
+func pkcs7Unpad(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, errors.New("empty data")
+	}
+
+	padding := int(data[len(data)-1])
+	if padding > len(data) || padding > aes.BlockSize {
+		return nil, errors.New("invalid padding")
+	}
+
+	// Verify padding bytes
+	for i := len(data) - padding; i < len(data); i++ {
+		if data[i] != byte(padding) {
+			return nil, errors.New("invalid padding")
+	}
+	}
+
+	return data[:len(data)-padding], nil
 }
 
 // mapStringInterfaceToMapString converts map[string]interface{} to map[string]string

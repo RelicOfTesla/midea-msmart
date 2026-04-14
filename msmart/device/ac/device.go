@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
@@ -699,6 +700,19 @@ func NewAirConditioner(ip string, port int, deviceID int, opts ...msmart.DeviceO
 		ac.supportedFanSpeeds = append(ac.supportedFanSpeeds, fs)
 	}
 
+	// Initialize supported capability overrides
+	// This is the Go equivalent of Python's _SUPPORTED_CAPABILITY_OVERRIDES
+	ac.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
+		"min_target_temperature":   {AttrName: "minTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
+		"max_target_temperature":   {AttrName: "maxTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
+		"supported_modes":          {AttrName: "supportedOpModes", ValueType: reflect.TypeOf(OperationalMode(0))},
+		"supported_swing_modes":    {AttrName: "supportedSwingModes", ValueType: reflect.TypeOf(SwingMode(0))},
+		"supported_fan_speeds":     {AttrName: "supportedFanSpeeds", ValueType: reflect.TypeOf(FanSpeed(0))},
+		"supported_aux_modes":      {AttrName: "supportedAuxModes", ValueType: reflect.TypeOf(AuxHeatMode(0))},
+		"supported_rate_selects":   {AttrName: "supportedRateSelects", ValueType: reflect.TypeOf(RateSelect(0))},
+		"additional_capabilities":  {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0))},
+	})
+
 	return ac
 }
 
@@ -1115,10 +1129,16 @@ func (ac *AirConditioner) ToggleDisplay(ctx context.Context) error {
 		slog.Warn("Device is not capable of display control", "id", ac.GetID())
 	}
 
-	// TODO: Implement actual display toggle
-	// This is a placeholder for the translation
+	// Send the command and ignore all responses
+	cmd := NewToggleDisplayCommand()
+	cmd.BeepOn = ac.beepOn
+	_, err := ac.sendCommandsGetResponses(ctx, []CommandInterface{cmd})
+	if err != nil {
+		return err
+	}
 
-	return fmt.Errorf("not implemented")
+	// Force a refresh to get the updated display state
+	return ac.Refresh(ctx)
 }
 
 // StartSelfClean starts a self cleaning if the device supports it
@@ -1305,9 +1325,478 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 // OverrideCapabilities overrides device capabilities via serialized dict
 // This is the Go equivalent of Python's override_capabilities method
 func (ac *AirConditioner) OverrideCapabilities(overrides map[string]interface{}, merge bool) error {
-	// TODO: Implement capability overrides
+	// Get supported overrides from parent
+	supportedOverrides := ac.GetSupportedCapabilityOverrides()
 
-	return fmt.Errorf("not implemented")
+	// Convert and apply each override
+	for key, value := range overrides {
+		// Check if override is allowed
+		overrideInfo, exists := supportedOverrides[key]
+		if !exists {
+			return fmt.Errorf("unsupported capabilities override '%s'", key)
+		}
+
+		// Get target attribute and value type
+		attrName := overrideInfo.AttrName
+		valueType := overrideInfo.ValueType
+
+		// Handle numeric overrides (float64)
+		if valueType == reflect.TypeOf(float64(0)) {
+			floatVal, ok := toFloat64(value)
+			if !ok {
+				return fmt.Errorf("'%s' must be a number", key)
+			}
+			ac.applyOverride(attrName, floatVal)
+			continue
+		}
+
+		// Handle OperationalMode enum overrides
+		if valueType == reflect.TypeOf(OperationalMode(0)) {
+			listVal, err := toOperationalModeList(value, merge, ac.supportedOpModes)
+			if err != nil {
+				return fmt.Errorf("'%s': %w", key, err)
+			}
+			ac.supportedOpModes = listVal
+			continue
+		}
+
+		// Handle SwingMode enum overrides
+		if valueType == reflect.TypeOf(SwingMode(0)) {
+			listVal, err := toSwingModeList(value, merge, ac.supportedSwingModes)
+			if err != nil {
+				return fmt.Errorf("'%s': %w", key, err)
+			}
+			ac.supportedSwingModes = listVal
+			continue
+		}
+
+		// Handle FanSpeed enum overrides
+		if valueType == reflect.TypeOf(FanSpeed(0)) {
+			listVal, err := toFanSpeedList(value, merge, ac.supportedFanSpeeds)
+			if err != nil {
+				return fmt.Errorf("'%s': %w", key, err)
+			}
+			ac.supportedFanSpeeds = listVal
+			continue
+		}
+
+		// Handle AuxHeatMode enum overrides
+		if valueType == reflect.TypeOf(AuxHeatMode(0)) {
+			listVal, err := toAuxHeatModeList(value, merge, ac.supportedAuxModes)
+			if err != nil {
+				return fmt.Errorf("'%s': %w", key, err)
+			}
+			ac.supportedAuxModes = listVal
+			continue
+		}
+
+		// Handle RateSelect enum overrides
+		if valueType == reflect.TypeOf(RateSelect(0)) {
+			listVal, err := toRateSelectList(value, merge, ac.supportedRateSelects)
+			if err != nil {
+				return fmt.Errorf("'%s': %w", key, err)
+			}
+			ac.supportedRateSelects = listVal
+			continue
+		}
+
+		// Handle Capability flag overrides
+		if valueType == reflect.TypeOf(Capability(0)) {
+			flags, err := toCapabilityFlags(value, merge, Capability(ac.capabilities.Flags()))
+			if err != nil {
+				return fmt.Errorf("'%s': %w", key, err)
+			}
+			ac.capabilities.SetFlags(int64(flags))
+			continue
+		}
+	}
+
+	// Update supported properties from capabilities
+	ac.updateSupportedProperties()
+
+	return nil
+}
+
+// applyOverride applies a numeric override to a field
+func (ac *AirConditioner) applyOverride(attrName string, value float64) {
+	switch attrName {
+	case "minTargetTemperature":
+		ac.minTargetTemperature = value
+	case "maxTargetTemperature":
+		ac.maxTargetTemperature = value
+	}
+}
+
+// toFloat64 attempts to convert a value to float64
+func toFloat64(value interface{}) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	default:
+		return 0, false
+	}
+}
+
+// toOperationalModeList converts a value to a list of OperationalMode
+func toOperationalModeList(value interface{}, merge bool, existing []OperationalMode) ([]OperationalMode, error) {
+	list, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("must be a list")
+	}
+
+	var modes []OperationalMode
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid value type in list")
+		}
+		mode, err := parseOperationalModeName(name)
+		if err != nil {
+			return nil, err
+		}
+		modes = append(modes, mode)
+	}
+
+	if merge {
+		modeSet := make(map[OperationalMode]bool)
+		for _, m := range existing {
+			modeSet[m] = true
+		}
+		for _, m := range modes {
+			modeSet[m] = true
+		}
+		modes = make([]OperationalMode, 0, len(modeSet))
+		for m := range modeSet {
+			modes = append(modes, m)
+		}
+	}
+
+	return modes, nil
+}
+
+// toSwingModeList converts a value to a list of SwingMode
+func toSwingModeList(value interface{}, merge bool, existing []SwingMode) ([]SwingMode, error) {
+	list, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("must be a list")
+	}
+
+	var modes []SwingMode
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid value type in list")
+		}
+		mode, err := parseSwingModeName(name)
+		if err != nil {
+			return nil, err
+		}
+		modes = append(modes, mode)
+	}
+
+	if merge {
+		modeSet := make(map[SwingMode]bool)
+		for _, m := range existing {
+			modeSet[m] = true
+		}
+		for _, m := range modes {
+			modeSet[m] = true
+		}
+		modes = make([]SwingMode, 0, len(modeSet))
+		for m := range modeSet {
+			modes = append(modes, m)
+		}
+	}
+
+	return modes, nil
+}
+
+// toFanSpeedList converts a value to a list of fan speeds
+func toFanSpeedList(value interface{}, merge bool, existing []interface{}) ([]interface{}, error) {
+	list, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("must be a list")
+	}
+
+	var speeds []interface{}
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			// Allow raw numbers for custom fan speeds
+			if num, ok := v.(float64); ok {
+				speeds = append(speeds, int(num))
+				continue
+			}
+			return nil, fmt.Errorf("invalid value type in list")
+		}
+		speed, err := parseFanSpeedName(name)
+		if err != nil {
+			return nil, err
+		}
+		speeds = append(speeds, speed)
+	}
+
+	if merge {
+		speedSet := make(map[interface{}]bool)
+		for _, s := range existing {
+			speedSet[s] = true
+		}
+		for _, s := range speeds {
+			speedSet[s] = true
+		}
+		speeds = make([]interface{}, 0, len(speedSet))
+		for s := range speedSet {
+			speeds = append(speeds, s)
+		}
+	}
+
+	return speeds, nil
+}
+
+// toAuxHeatModeList converts a value to a list of AuxHeatMode
+func toAuxHeatModeList(value interface{}, merge bool, existing []AuxHeatMode) ([]AuxHeatMode, error) {
+	list, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("must be a list")
+	}
+
+	var modes []AuxHeatMode
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid value type in list")
+		}
+		mode, err := parseAuxHeatModeName(name)
+		if err != nil {
+			return nil, err
+		}
+		modes = append(modes, mode)
+	}
+
+	if merge {
+		modeSet := make(map[AuxHeatMode]bool)
+		for _, m := range existing {
+			modeSet[m] = true
+		}
+		for _, m := range modes {
+			modeSet[m] = true
+		}
+		modes = make([]AuxHeatMode, 0, len(modeSet))
+		for m := range modeSet {
+			modes = append(modes, m)
+		}
+	}
+
+	return modes, nil
+}
+
+// toRateSelectList converts a value to a list of RateSelect
+func toRateSelectList(value interface{}, merge bool, existing []RateSelect) ([]RateSelect, error) {
+	list, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("must be a list")
+	}
+
+	var rates []RateSelect
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid value type in list")
+		}
+		rate, err := parseRateSelectName(name)
+		if err != nil {
+			return nil, err
+		}
+		rates = append(rates, rate)
+	}
+
+	if merge {
+		rateSet := make(map[RateSelect]bool)
+		for _, r := range existing {
+			rateSet[r] = true
+		}
+		for _, r := range rates {
+			rateSet[r] = true
+		}
+		rates = make([]RateSelect, 0, len(rateSet))
+		for r := range rateSet {
+			rates = append(rates, r)
+		}
+	}
+
+	return rates, nil
+}
+
+// toCapabilityFlags converts a value to Capability flags
+func toCapabilityFlags(value interface{}, merge bool, existing Capability) (Capability, error) {
+	list, ok := value.([]interface{})
+	if !ok {
+		return 0, fmt.Errorf("must be a list")
+	}
+
+	flags := Capability(0)
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok {
+			return 0, fmt.Errorf("invalid value type in list")
+		}
+		flag, err := parseCapabilityName(name)
+		if err != nil {
+			return 0, err
+		}
+		flags |= flag
+	}
+
+	if merge {
+		flags |= existing
+	}
+
+	return flags, nil
+}
+
+// Enum name parsing functions
+func parseOperationalModeName(name string) (OperationalMode, error) {
+	switch name {
+	case "AUTO":
+		return OperationalModeAuto, nil
+	case "COOL":
+		return OperationalModeCool, nil
+	case "DRY":
+		return OperationalModeDry, nil
+	case "HEAT":
+		return OperationalModeHeat, nil
+	case "FAN_ONLY":
+		return OperationalModeFanOnly, nil
+	case "SMART_DRY":
+		return OperationalModeSmartDry, nil
+	default:
+		return 0, fmt.Errorf("invalid OperationalMode name: %s", name)
+	}
+}
+
+func parseSwingModeName(name string) (SwingMode, error) {
+	switch name {
+	case "OFF":
+		return SwingModeOff, nil
+	case "VERTICAL":
+		return SwingModeVertical, nil
+	case "HORIZONTAL":
+		return SwingModeHorizontal, nil
+	case "BOTH":
+		return SwingModeBoth, nil
+	default:
+		return 0, fmt.Errorf("invalid SwingMode name: %s", name)
+	}
+}
+
+func parseFanSpeedName(name string) (FanSpeed, error) {
+	switch name {
+	case "AUTO":
+		return FanSpeedAuto, nil
+	case "MAX":
+		return FanSpeedMax, nil
+	case "HIGH":
+		return FanSpeedHigh, nil
+	case "MEDIUM":
+		return FanSpeedMedium, nil
+	case "LOW":
+		return FanSpeedLow, nil
+	case "SILENT":
+		return FanSpeedSilent, nil
+	default:
+		return 0, fmt.Errorf("invalid FanSpeed name: %s", name)
+	}
+}
+
+func parseAuxHeatModeName(name string) (AuxHeatMode, error) {
+	switch name {
+	case "OFF":
+		return AuxHeatModeOff, nil
+	case "AUX_HEAT":
+		return AuxHeatModeAuxHeat, nil
+	case "AUX_ONLY":
+		return AuxHeatModeAuxOnly, nil
+	default:
+		return 0, fmt.Errorf("invalid AuxHeatMode name: %s", name)
+	}
+}
+
+func parseRateSelectName(name string) (RateSelect, error) {
+	switch name {
+	case "OFF":
+		return RateSelectOff, nil
+	case "GEAR_50":
+		return RateSelectGear50, nil
+	case "GEAR_75":
+		return RateSelectGear75, nil
+	case "LEVEL_1":
+		return RateSelectLevel1, nil
+	case "LEVEL_2":
+		return RateSelectLevel2, nil
+	case "LEVEL_3":
+		return RateSelectLevel3, nil
+	case "LEVEL_4":
+		return RateSelectLevel4, nil
+	case "LEVEL_5":
+		return RateSelectLevel5, nil
+	default:
+		return 0, fmt.Errorf("invalid RateSelect name: %s", name)
+	}
+}
+
+func parseCapabilityName(name string) (Capability, error) {
+	switch name {
+	case "CUSTOM_FAN_SPEED":
+		return CapabilityCustomFanSpeed, nil
+	case "ECO":
+		return CapabilityEco, nil
+	case "FREEZE_PROTECTION":
+		return CapabilityFreezeProtection, nil
+	case "IECO":
+		return CapabilityIECO, nil
+	case "TURBO":
+		return CapabilityTurbo, nil
+	case "DISPLAY_CONTROL":
+		return CapabilityDisplayControl, nil
+	case "ENERGY_STATS":
+		return CapabilityEnergyStats, nil
+	case "FILTER_REMINDER":
+		return CapabilityFilterReminder, nil
+	case "HUMIDITY":
+		return CapabilityHumidity, nil
+	case "TARGET_HUMIDITY":
+		return CapabilityTargetHumidity, nil
+	case "SWING_HORIZONTAL_ANGLE":
+		return CapabilitySwingHorizontalAngle, nil
+	case "SWING_VERTICAL_ANGLE":
+		return CapabilitySwingVerticalAngle, nil
+	case "BREEZE_AWAY":
+		return CapabilityBreezeAway, nil
+	case "BREEZE_CONTROL":
+		return CapabilityBreezeControl, nil
+	case "BREEZELESS":
+		return CapabilityBreezeless, nil
+	case "CASCADE":
+		return CapabilityCascade, nil
+	case "JET_COOL":
+		return CapabilityJetCool, nil
+	case "OUT_SILENT":
+		return CapabilityOutSilent, nil
+	case "PURIFIER":
+		return CapabilityPurifier, nil
+	case "SELF_CLEAN":
+		return CapabilitySelfClean, nil
+	default:
+		return 0, fmt.Errorf("invalid Capability name: %s", name)
+	}
 }
 
 // ============================================================================

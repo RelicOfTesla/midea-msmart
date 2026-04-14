@@ -567,9 +567,14 @@ func (p *_LanProtocolV3) GetLocalKey(key []byte, data []byte) ([]byte, error) {
 	}
 
 	// Construct the local key using XOR
-	localKey := make([]byte, 32)
-	for i := 0; i < 32; i++ {
-		localKey[i] = decryptedPayload[i] ^ key[i%len(key)]
+	// Python's strxor requires equal-length inputs, so we must match that behavior
+	if len(key) != len(decryptedPayload) {
+		return nil, &AuthenticationError{Message: "Key length must match decrypted payload length."}
+	}
+
+	localKey := make([]byte, len(decryptedPayload))
+	for i := range decryptedPayload {
+		localKey[i] = decryptedPayload[i] ^ key[i]
 	}
 
 	return localKey, nil

@@ -480,15 +480,6 @@ func (cm *CapabilityManager) SetFlags(flags Capability) {
 type CommercialAirConditioner struct {
 	*msmart.Device
 
-	// Local LAN connection for sending commands
-	// (msmart.Device's LAN is private, so we maintain our own)
-	lan *msmart.LAN
-
-	// Local online/supported status tracking
-	// (msmart.Device's fields are private, so we track locally)
-	online    bool
-	supported bool
-
 	// Basic controls
 	powerState         bool
 	targetTemperature  float64
@@ -530,10 +521,7 @@ type CommercialAirConditioner struct {
 // In Python: def __init__(self, ip: str, device_id: int, port: int, **kwargs)
 func NewCommercialAirConditioner(ip string, deviceID int, port int) *CommercialAirConditioner {
 	ac := &CommercialAirConditioner{
-		Device:    msmart.NewDevice(ip, port, deviceID, msmart.DeviceTypeCommercialAC),
-		lan:       msmart.NewLAN(ip, port, int64(deviceID)),
-		online:    false,
-		supported: false,
+		Device: msmart.NewDevice(ip, port, deviceID, msmart.DeviceTypeCommercialAC),
 
 		// Basic controls
 		powerState:         false,
@@ -1278,11 +1266,6 @@ func (ac *CommercialAirConditioner) SetAuxMode(mode AuxHeatMode) {
 // In Python: def to_dict(self) -> dict
 func (ac *CommercialAirConditioner) ToDict() map[string]interface{} {
 	result := ac.Device.ToDict()
-
-	// Override online/supported with our local tracking
-	// (since we can't modify msmart.Device's private fields)
-	result["online"] = ac.online
-	result["supported"] = ac.supported
 
 	result["power"] = ac.GetPowerState()
 	result["target_temperature"] = ac.GetTargetTemperature()

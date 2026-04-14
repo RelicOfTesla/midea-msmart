@@ -453,3 +453,13 @@ func Construct(deviceType DeviceType, opts ...DeviceOption) *Device {
 	// For this translation, we just return a generic Device
 	return NewDevice("", 0, 0, deviceType, opts...)
 }
+
+// GetSupportedCapabilityOverrides returns the supported capability overrides map
+func (d *Device) GetSupportedCapabilityOverrides() map[string]CapabilityOverrideInfo {
+	return d.supportedCapabilityOverrides
+}
+
+// SetSupportedCapabilityOverrides sets the supported capability overrides map
+func (d *Device) SetSupportedCapabilityOverrides(overrides map[string]CapabilityOverrideInfo) {
+	d.supportedCapabilityOverrides = overrides
+}
