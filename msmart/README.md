@@ -3,6 +3,8 @@
 A Go library for local control of Midea (and associated brands) smart air conditioners. Designed for ease of integration with minimal dependencies.
 
 > This is a Go translation of [msmart-ng](https://github.com/mill1000/midea-msmart) Python library.
+> 
+> **Note:** This project is developed using vibe coding.
 
 ## Supported Devices
 
