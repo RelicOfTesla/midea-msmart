@@ -20,7 +20,14 @@ func skipIfCI(t *testing.T) {
 func TestNetHomePlusCloud_Login(t *testing.T) {
 	skipIfCI(t)
 
-	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, nil, nil, nil)
+	// Skip if no real credentials provided (these tests require actual cloud account)
+	account := os.Getenv("MIDEA_ACCOUNT")
+	password := os.Getenv("MIDEA_PASSWORD")
+	if account == "" || password == "" {
+		t.Skip("Skipping: requires MIDEA_ACCOUNT and MIDEA_PASSWORD environment variables")
+	}
+
+	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, &account, &password, nil)
 	if err != nil {
 		t.Fatalf("Failed to create NetHomePlusCloud: %v", err)
 	}
@@ -92,9 +99,15 @@ func TestNetHomePlusCloud_InvalidCredentials(t *testing.T) {
 func TestNetHomePlusCloud_GetToken(t *testing.T) {
 	skipIfCI(t)
 
+	account := os.Getenv("MIDEA_ACCOUNT")
+	password := os.Getenv("MIDEA_PASSWORD")
+	if account == "" || password == "" {
+		t.Skip("Skipping: requires MIDEA_ACCOUNT and MIDEA_PASSWORD environment variables")
+	}
+
 	dummyUDPID := "4fbe0d4139de99dd88a0285e14657045"
 
-	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, nil, nil, nil)
+	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, &account, &password, nil)
 	if err != nil {
 		t.Fatalf("Failed to create NetHomePlusCloud: %v", err)
 	}
@@ -122,9 +135,15 @@ func TestNetHomePlusCloud_GetToken(t *testing.T) {
 func TestNetHomePlusCloud_GetTokenException(t *testing.T) {
 	skipIfCI(t)
 
+	account := os.Getenv("MIDEA_ACCOUNT")
+	password := os.Getenv("MIDEA_PASSWORD")
+	if account == "" || password == "" {
+		t.Skip("Skipping: requires MIDEA_ACCOUNT and MIDEA_PASSWORD environment variables")
+	}
+
 	badUDPID := "NOT_A_UDPID"
 
-	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, nil, nil, nil)
+	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, &account, &password, nil)
 	if err != nil {
 		t.Fatalf("Failed to create NetHomePlusCloud: %v", err)
 	}
@@ -144,8 +163,14 @@ func TestNetHomePlusCloud_GetTokenException(t *testing.T) {
 func TestNetHomePlusCloud_ConnectException(t *testing.T) {
 	skipIfCI(t)
 
+	account := os.Getenv("MIDEA_ACCOUNT")
+	password := os.Getenv("MIDEA_PASSWORD")
+	if account == "" || password == "" {
+		t.Skip("Skipping: requires MIDEA_ACCOUNT and MIDEA_PASSWORD environment variables")
+	}
+
 	// Create a client with a custom HTTP client that will fail
-	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, nil, nil, func() *http.Client {
+	client, err := msmart.NewNetHomePlusCloud(msmart.DefaultCloudRegion, &account, &password, func() *http.Client {
 		return &http.Client{
 			Timeout: 1, // Very short timeout to force failure
 		}
@@ -167,7 +192,13 @@ func TestNetHomePlusCloud_ConnectException(t *testing.T) {
 func TestSmartHomeCloud_Login(t *testing.T) {
 	skipIfCI(t)
 
-	client, err := msmart.NewSmartHomeCloud(msmart.DefaultCloudRegion, nil, nil, false, nil)
+	account := os.Getenv("MIDEA_ACCOUNT")
+	password := os.Getenv("MIDEA_PASSWORD")
+	if account == "" || password == "" {
+		t.Skip("Skipping: requires MIDEA_ACCOUNT and MIDEA_PASSWORD environment variables")
+	}
+
+	client, err := msmart.NewSmartHomeCloud(msmart.DefaultCloudRegion, &account, &password, false, nil)
 	if err != nil {
 		t.Fatalf("Failed to create SmartHomeCloud: %v", err)
 	}
