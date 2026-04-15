@@ -54,6 +54,30 @@ func (e *ProtocolError) Unwrap() error {
 	return e.Cause
 }
 
+// RpcTimeoutError represents an RPC timeout error
+// This indicates that a specific command did not receive a response within the timeout period,
+// but the connection itself may still be valid.
+// This is different from a connection timeout, which indicates a problem with the connection.
+type RpcTimeoutError struct {
+	Message string
+	Cause   error
+}
+
+func (e *RpcTimeoutError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("rpc timeout: %s: %v", e.Message, e.Cause)
+	}
+	return fmt.Sprintf("rpc timeout: %s", e.Message)
+}
+
+func (e *RpcTimeoutError) Unwrap() error {
+	return e.Cause
+}
+
+func (e *RpcTimeoutError) Timeout() bool {
+	return true
+}
+
 // AuthenticationError represents an authentication error
 type AuthenticationError struct {
 	Message string
@@ -644,6 +668,7 @@ type LAN struct {
 	mu                    sync.Mutex
 	conn                  net.Conn // Store connection for deadline management
 	readTimeout           time.Duration
+	disconnectOnTimeout   bool     // Whether to disconnect on timeout (default: false)
 }
 
 // Retries is the default number of retries
@@ -656,7 +681,7 @@ func NewLAN(ip string, port int, deviceID int64) *LAN {
 		port:            port,
 		deviceID:        deviceID,
 		protocolVersion: 2,
-		readTimeout:     5 * time.Second, // Default read timeout
+		readTimeout:     15 * time.Second, // Default read timeout
 	}
 }
 
@@ -668,6 +693,12 @@ func (l *LAN) Token() []byte {
 // Key returns the current key
 func (l *LAN) Key() []byte {
 	return l.key
+}
+
+// IsAuthenticated checks if the LAN connection is authenticated (for V3 devices)
+// It also checks if the connection is still alive
+func (l *LAN) IsAuthenticated() bool {
+	return l.protocolV3 != nil && l.protocolV3.Authenticated() && l.alive()
 }
 
 // MaxConnectionLifetime returns the maximum connection lifetime in seconds
@@ -687,6 +718,12 @@ func (l *LAN) SetMaxConnectionLifetime(seconds *int) {
 		d := time.Duration(*seconds) * time.Second
 		l.maxConnectionLifetime = &d
 	}
+}
+
+// SetDisconnectOnTimeout sets whether to disconnect on timeout
+// Default is false (keep connection alive on timeout)
+func (l *LAN) SetDisconnectOnTimeout(disconnect bool) {
+	l.disconnectOnTimeout = disconnect
 }
 
 // Alive checks if the connection is alive
@@ -861,6 +898,11 @@ func (l *LAN) read(timeout time.Duration) ([]byte, error) {
 	// Await a response
 	packet, err := l.protocol.Read(timeout)
 	if err != nil {
+		// Check if it's a timeout error using net.Error interface
+		// This is more reliable than string matching
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return nil, &RpcTimeoutError{Message: "read timeout", Cause: err}
+		}
 		return nil, err
 	}
 	verboseLog("Received packet from %s: %x", l.protocol.Peer(), packet)
@@ -957,19 +999,27 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 		}
 		resp, err := l.read(readTimeout)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+			// Check if it's a RpcTimeoutError (already wrapped in read method)
+			var rpcTimeoutErr *RpcTimeoutError
+			if errors.As(err, &rpcTimeoutErr) {
+				// RPC timeout: client is abandoning this request, no retry
+				// Connection is still valid, don't disconnect
+				return nil, rpcTimeoutErr
+			}
+			
+			// Check if it's a connection error
+			isConnectionError := errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed)
+			if isConnectionError {
+				l.disconnect()
 				if retries > 1 {
-					logger.Printf("Read timeout. Resending to %s.", l.protocol.Peer())
+					logger.Printf("Connection error. Retrying to %s.", l.protocol.Peer())
 					retries--
 					continue
-				} else {
-					l.disconnect()
-					return nil, &ProtocolError{Message: "No response from host.", Cause: err}
 				}
+				return nil, &ProtocolError{Message: "Connection error.", Cause: err}
 			}
-
-			// Disconnect on protocol errors and reraise
-			logger.Printf("Send failed to %s. Error: %v", l.protocol.Peer(), err)
+			
+			// Other errors: disconnect and return
 			l.disconnect()
 			return nil, err
 		}
