@@ -709,6 +709,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 		Timeout:         5 * time.Second,
 		DiscoveryPackets: 3,
 		AutoConnect:      true, // Enable auto-connect to get token/key
+		Region:          msmart.DefaultCloudRegion, // Use default region for default credentials
 	}
 
 	devices, err := msmart.Discover(ctx, discoverConfig)
