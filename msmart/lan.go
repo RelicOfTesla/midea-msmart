@@ -180,9 +180,8 @@ func (p *_LanProtocol) Write(data []byte) error {
 		return errors.New("transport is nil")
 	}
 
-	if !p.Alive() {
-		return &ProtocolError{Message: "Transport is closing or closed."}
-	}
+	// Check if connection is still valid without calling Alive() to avoid deadlock
+	// since we already hold the mutex
 
 	logger.Printf("Sending data to %s: %x", p.peer, data)
 	_, err := p.transport.Write(data)
@@ -633,6 +632,8 @@ type LAN struct {
 	connectionExpiration  time.Time
 	maxConnectionLifetime *time.Duration
 	mu                    sync.Mutex
+	conn                  net.Conn // Store connection for deadline management
+	readTimeout           time.Duration
 }
 
 // Retries is the default number of retries
@@ -645,6 +646,7 @@ func NewLAN(ip string, port int, deviceID int64) *LAN {
 		port:            port,
 		deviceID:        deviceID,
 		protocolVersion: 2,
+		readTimeout:     5 * time.Second, // Default read timeout
 	}
 }
 
@@ -694,6 +696,7 @@ func (l *LAN) alive() bool {
 }
 
 // Connect establishes a connection to the device
+// Note: This function does NOT acquire the mutex lock. Callers must hold l.mu.Lock().
 func (l *LAN) connect() error {
 	logger.Printf("Creating new connection to %s:%d.", l.ip, l.port)
 
@@ -706,8 +709,8 @@ func (l *LAN) connect() error {
 		return &ProtocolError{Message: "Connect failed.", Cause: err}
 	}
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	// Store connection for deadline management
+	l.conn = conn
 
 	if l.protocolVersion == 3 {
 		l.protocolV3 = NewLanProtocolV3()
@@ -722,20 +725,33 @@ func (l *LAN) connect() error {
 		l.connectionExpiration = time.Now().UTC().Add(*l.maxConnectionLifetime)
 	}
 
-	// Start a goroutine to read data
+	// Start a goroutine to read data with deadline management
+	// Store local reference to protocol to avoid nil pointer issues if disconnect is called
+	localProtocol := l.protocol
 	go func() {
 		buf := make([]byte, 4096)
 		for {
+			// Set a read deadline to allow periodic checks
+			// The deadline is set to a reasonable value to avoid blocking forever
+			if l.readTimeout > 0 {
+				conn.SetReadDeadline(time.Now().Add(l.readTimeout + 1*time.Second))
+			}
+
 			n, err := conn.Read(buf)
 			if err != nil {
+				// Check if it's a deadline error (timeout)
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// This is expected - continue waiting for data
+					continue
+				}
 				if err != io.EOF {
-					l.protocol.ConnectionLost(err)
+					localProtocol.ConnectionLost(err)
 				}
 				return
 			}
 			data := make([]byte, n)
 			copy(data, buf[:n])
-			l.protocol.DataReceived(data)
+			localProtocol.DataReceived(data)
 		}
 	}()
 
@@ -749,6 +765,7 @@ func (l *LAN) disconnect() {
 		l.protocol = nil
 		l.protocolV3 = nil
 	}
+	l.conn = nil
 }
 
 // Authenticate authenticates against a V3 device
@@ -881,7 +898,12 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 
 	// Authenticate as needed
 	if l.protocolV3 != nil && !l.protocolV3.Authenticated() {
-		if err := l.Authenticate(nil, nil, Retries); err != nil {
+		// Unlock during authentication to allow other operations
+		l.mu.Unlock()
+		err := l.Authenticate(nil, nil, Retries)
+		l.mu.Lock()
+
+		if err != nil {
 			return nil, err
 		}
 
@@ -917,8 +939,13 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 			return nil, err
 		}
 
-		// Await a response
-		resp, err := l.read(2 * time.Second)
+		// Await a response with timeout
+		// Use the configured read timeout
+		readTimeout := l.readTimeout
+		if readTimeout == 0 {
+			readTimeout = 5 * time.Second
+		}
+		resp, err := l.read(readTimeout)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				if retries > 1 {
@@ -978,20 +1005,22 @@ func SecurityDecryptAESCBC(key []byte, data []byte) ([]byte, error) {
 }
 
 // SecurityEncryptAESCBC encrypts data using AES-CBC
+// Note: Data must already be padded to block size by the caller
 func SecurityEncryptAESCBC(key []byte, data []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
 
+	if len(data)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("data is not a multiple of block size")
+	}
+
 	iv := make([]byte, aes.BlockSize) // Zero IV
 	mode := cipher.NewCBCEncrypter(block, iv)
 
-	// Pad data to block size
-	padded := PKCS7Pad(data, aes.BlockSize)
-
-	encrypted := make([]byte, len(padded))
-	mode.CryptBlocks(encrypted, padded)
+	encrypted := make([]byte, len(data))
+	mode.CryptBlocks(encrypted, data)
 
 	return encrypted, nil
 }

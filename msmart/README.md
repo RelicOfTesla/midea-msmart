@@ -35,16 +35,17 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/RelicOfTesla/midea-msmart/msmart"
+    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
     "github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
 )
 
 func main() {
-    // Build device
+    // Build device (ip, port, deviceID, options...)
     device := ac.NewAirConditioner(
-        ac.WithIP("10.100.1.140"),
-        ac.WithPort(6444),
-        ac.WithDeviceID(15393162840672),
+        "10.100.1.140",  // IP address
+        6444,            // Port
+        15393162840672,  // Device ID
+        msmart.WithName("Living Room AC"),
     )
 
     // Get capabilities
@@ -58,8 +59,11 @@ func main() {
         panic(err)
     }
 
-    fmt.Printf("Power: %v\n", device.GetPowerState())
-    fmt.Printf("Temperature: %.1f°C\n", device.GetTargetTemperature())
+    power := device.PowerState()
+    if power != nil {
+        fmt.Printf("Power: %v\n", *power)
+    }
+    fmt.Printf("Temperature: %.1f°C\n", device.TargetTemperature())
 }
 ```
 
@@ -73,14 +77,14 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/RelicOfTesla/midea-msmart/msmart"
+    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
 
 func main() {
     ctx := context.Background()
 
-    // Discover all devices on the network
-    devices, err := msmart.Discover(ctx)
+    // Discover all devices on the network (pass nil for default config)
+    devices, err := msmart.Discover(ctx, nil)
     if err != nil {
         panic(err)
     }
@@ -90,12 +94,14 @@ func main() {
     }
 
     // Discover a single device by IP
-    device, err := msmart.DiscoverSingle(ctx, "10.100.1.140")
+    device, err := msmart.DiscoverSingle(ctx, "10.100.1.140", nil)
     if err != nil {
         panic(err)
     }
 
-    fmt.Printf("Device: %s\n", device.GetName())
+    if device != nil {
+        fmt.Printf("Device: %s\n", device.GetName())
+    }
 }
 ```
 
@@ -131,13 +137,14 @@ import (
     "context"
     "encoding/json"
     "fmt"
-    "github.com/RelicOfTesla/midea-msmart/msmart"
+    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
 
 func main() {
     ctx := context.Background()
 
-    devices, err := msmart.Discover(ctx)
+    // Discover all devices (pass nil for default config)
+    devices, err := msmart.Discover(ctx, nil)
     if err != nil {
         panic(err)
     }
@@ -154,8 +161,8 @@ func main() {
             "sn":       device.GetSN(),
         }
 
-        json, _ := json.MarshalIndent(data, "", "  ")
-        fmt.Println(string(json))
+        jsonData, _ := json.MarshalIndent(data, "", "  ")
+        fmt.Println(string(jsonData))
     }
 }
 ```
@@ -175,20 +182,30 @@ package main
 
 import (
     "context"
+    "encoding/hex"
+    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
     "github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
 )
 
 func main() {
     ctx := context.Background()
 
-    // Create device
+    // For V3 devices, you need token and key from discovery or cloud
+    token, _ := hex.DecodeString("YOUR_TOKEN_HEX_STRING")
+    key, _ := hex.DecodeString("YOUR_KEY_HEX_STRING")
+
+    // Create device (ip, port, deviceID, options...)
     device := ac.NewAirConditioner(
-        ac.WithIP("10.100.1.140"),
-        ac.WithPort(6444),
-        ac.WithDeviceID(15393162840672),
-        ac.WithToken("YOUR_TOKEN"),  // For V3 devices
-        ac.WithKey("YOUR_KEY"),      // For V3 devices
+        "10.100.1.140",  // IP address
+        6444,            // Port
+        15393162840672,  // Device ID
+        msmart.WithVersion(3),  // For V3 devices
     )
+
+    // Authenticate V3 device (required before control)
+    if err := device.Authenticate(token, key); err != nil {
+        panic(err)
+    }
 
     // Get current state
     if err := device.Refresh(ctx); err != nil {
@@ -199,7 +216,7 @@ func main() {
     device.SetPowerState(true)
     device.SetTargetTemperature(20.5)
     device.SetOperationalMode(ac.OperationalModeCool)
-    device.SetFanSpeed(ac.FanSpeed100)
+    device.SetFanSpeed(ac.FanSpeedHigh)
 
     // Apply changes
     if err := device.Apply(ctx); err != nil {
@@ -216,16 +233,19 @@ package main
 import (
     "context"
     "fmt"
+    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
     "github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
 )
 
 func main() {
     ctx := context.Background()
 
+    // Create device (ip, port, deviceID, options...)
     device := ac.NewAirConditioner(
-        ac.WithIP("10.100.1.140"),
-        ac.WithPort(6444),
-        ac.WithDeviceID(15393162840672),
+        "10.100.1.140",  // IP address
+        6444,            // Port
+        15393162840672,  // Device ID
+        msmart.WithVersion(3),  // For V3 devices
     )
 
     // Refresh device state
@@ -234,11 +254,15 @@ func main() {
     }
 
     // Print current state
-    fmt.Printf("Power: %v\n", device.GetPowerState())
-    fmt.Printf("Target Temperature: %.1f°C\n", device.GetTargetTemperature())
-    fmt.Printf("Indoor Temperature: %.1f°C\n", device.GetIndoorTemperature())
-    fmt.Printf("Operational Mode: %v\n", device.GetOperationalMode())
-    fmt.Printf("Fan Speed: %v\n", device.GetFanSpeed())
+    if power := device.PowerState(); power != nil {
+        fmt.Printf("Power: %v\n", *power)
+    }
+    fmt.Printf("Target Temperature: %.1f°C\n", device.TargetTemperature())
+    if indoor := device.IndoorTemperature(); indoor != nil {
+        fmt.Printf("Indoor Temperature: %.1f°C\n", *indoor)
+    }
+    fmt.Printf("Operational Mode: %v\n", device.OperationalMode())
+    fmt.Printf("Fan Speed: %v\n", device.FanSpeed())
 }
 ```
 
