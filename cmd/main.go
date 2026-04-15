@@ -172,8 +172,9 @@ midea - 美的空调控制 CLI v` + version + `
   --device_type <类型> 设备类型: AC (空调), CC (商业空调), 默认: AC
 
 命令:
-  discover [--auto-connect|-a] [--account <账号> --password <密码>]
+  discover [<host>] [--auto-connect|-a] [--account <账号> --password <密码>]
                                 发现设备并保存到配置
+                                <host>: 可选，指定目标设备IP (发现单个设备)
                                 --auto-connect: 自动连接并获取V3设备的token
                                 --account/--password: 美的账号密码 (V3设备认证需要)
   list                          列出已保存的设备
@@ -215,7 +216,8 @@ set命令选项:
   --power <on|off>   设置电源
 
 示例:
-  midea discover                      # 发现局域网内的设备
+  midea discover                      # 发现局域网内的所有设备
+  midea discover 192.168.1.60         # 发现指定IP的设备
   midea -v discover --auto-connect   # 使用verbose模式发现设备并自动获取V3设备token
   midea discover --auto-connect --account your@email.com --password yourpass
                                       # 使用自定义账号发现设备
@@ -257,11 +259,12 @@ func handleDiscover(configPath string, region string) {
 		os.Exit(1)
 	}
 
-	// Parse flags
+	// Parse host argument and flags
 	autoConnect := false
-	var account, password string
+	var account, password, targetHost string
 	for i := 2; i < len(os.Args); i++ {
-		switch os.Args[i] {
+		arg := os.Args[i]
+		switch arg {
 		case "--auto-connect", "-a":
 			autoConnect = true
 		case "--account":
@@ -274,6 +277,11 @@ func handleDiscover(configPath string, region string) {
 				password = os.Args[i+1]
 				i++
 			}
+		default:
+			// First non-flag argument is the target host
+			if !strings.HasPrefix(arg, "-") && targetHost == "" {
+				targetHost = arg
+			}
 		}
 	}
 
@@ -283,6 +291,12 @@ func handleDiscover(configPath string, region string) {
 		DiscoveryPackets: 3,
 		AutoConnect:      autoConnect,
 		Region:           region,
+	}
+
+	// Set target host if provided (for single device discovery)
+	if targetHost != "" {
+		discoverConfig.Target = targetHost
+		fmt.Printf("🎯 目标设备: %s\n", targetHost)
 	}
 
 	// Set account and password if provided
