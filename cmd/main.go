@@ -15,6 +15,7 @@ import (
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 	"github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
 	"github.com/RelicOfTesla/midea-msmart/msmart/device/cc"
+	"gopkg.in/yaml.v3"
 )
 
 var version = "1.0.0"
@@ -174,7 +175,7 @@ midea - 美的空调控制 CLI v` + version + `
 命令:
   discover [<host>] [--auto-connect|-a] [--count <数量>] [--account <账号> --password <密码>]
                                 发现设备并保存到配置
-                                <host>: 可选，指定目标设备IP (发现单个设备)
+                                <host>: 可选,指定目标设备IP (发现单个设备)
                                 --auto-connect: 自动连接并获取V3设备的token
                                 --count: 广播包数量 (默认: 3)
                                 --account/--password: 美的账号密码 (V3设备认证需要)
@@ -182,10 +183,11 @@ midea - 美的空调控制 CLI v` + version + `
   bind <id|sn|ip> -n <名称>   绑定设备别名
   unbind <name|id>            解绑设备
 
-  status <name|id> [--auto] [--capabilities] [--energy]
+  status <name|id> [--auto] [--capabilities [FILE]] [--energy]
                                 查询设备状态
                                 --auto: 自动发现设备并获取token
                                 --capabilities: 显示设备能力信息
+                                --capabilities FILE: 将设备能力写入YAML文件
                                 --energy: 显示能耗信息
   on <name|id>                开机
   off <name|id>               关机
@@ -224,10 +226,11 @@ set命令选项:
                                       # 使用自定义账号发现设备
   midea list                          # 列出已保存的设备
   midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备,命名为"客厅"
-  midea status 客厅                   # 查询“客厅”空调状态
-  midea status 客厅 --capabilities    # 查询“客厅”空调状态并显示设备能力
-  midea status 客厅 --energy          # 查询“客厅”空调状态并显示能耗信息
-  midea on 客厅                       # 打开“客厅”空调
+  midea status 客厅                   # 查询"客厅"空调状态
+  midea status 客厅 --capabilities    # 查询"客厅"空调状态并显示设备能力
+  midea status 客厅 --capabilities caps.yaml  # 将设备能力写入 caps.yaml 文件
+  midea status 客厅 --energy          # 查询"客厅"空调状态并显示能耗信息
+  midea on 客厅                       # 打开"客厅"空调
   midea temp 客厅 26                  # 设置温度为26°C
   midea mode 客厅 cool                # 设置为制冷模式
   midea fan 客厅 high                 # 设置为高风速
@@ -591,7 +594,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 	case DeviceTypeCC:
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(device.IP, int(deviceID), device.Port)
-		fmt.Println("ℹ️  商业空调设备 (CC) 支持有限，部分命令可能不可用")
+		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
 		return device, ccDevice
 	default:
 		// Create Air Conditioner (default)
@@ -607,7 +610,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 		if device.Version == 3 {
 			if device.Token == "" || device.Key == "" {
 				fmt.Printf("❌ V3设备需要token和key进行认证\n")
-				fmt.Println("💡 使用 '--auto' 参数自动获取token/key，或使用 'midea discover --auto-connect' 重新发现设备")
+				fmt.Println("💡 使用 '--auto' 参数自动获取token/key,或使用 'midea discover --auto-connect' 重新发现设备")
 				os.Exit(1)
 			}
 
@@ -656,7 +659,7 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 	case DeviceTypeCC:
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(host, deviceID, 6444)
-		fmt.Println("ℹ️  商业空调设备 (CC) 支持有限，部分命令可能不可用")
+		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
 		return device, ccDevice
 	default:
 		// Create Air Conditioner (default)
@@ -814,7 +817,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 	case DeviceTypeCC:
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(d.GetIP(), int(deviceID), d.GetPort())
-		fmt.Println("ℹ️  商业空调设备 (CC) 支持有限，部分命令可能不可用")
+		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
 		return device, ccDevice
 	default:
 		// Create Air Conditioner (default)
@@ -859,6 +862,7 @@ func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceT
 	// Parse --auto, --capabilities and --energy flags
 	autoMode := false
 	showCapabilities := false
+	var capabilitiesFile string // Empty string means display to screen only
 	showEnergy := false
 	identifier := os.Args[2]
 	for i := 3; i < len(os.Args); i++ {
@@ -867,6 +871,11 @@ func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceT
 		}
 		if os.Args[i] == "--capabilities" {
 			showCapabilities = true
+			// Check if next argument is a file path (not starting with --)
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				capabilitiesFile = os.Args[i+1]
+				i++ // Skip next argument
+			}
 		}
 		if os.Args[i] == "--energy" {
 			showEnergy = true
@@ -901,8 +910,17 @@ func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceT
 	if err := acDevice.GetCapabilities(ctx); err != nil {
 		fmt.Printf("⚠️  获取设备能力失败: %v\n", err)
 	} else if showCapabilities {
-		// Display capabilities if requested
-		printCapabilities(acDevice)
+		// If a file path is specified, write to file
+		if capabilitiesFile != "" {
+			if err := writeCapabilitiesToYAML(acDevice, capabilitiesFile); err != nil {
+				fmt.Printf("❌ 写入能力信息到文件失败: %v\n", err)
+			} else {
+				fmt.Printf("✅ 设备能力已写入: %s\n", capabilitiesFile)
+			}
+		} else {
+			// Display capabilities to screen
+			printCapabilities(acDevice)
+		}
 	}
 
 	// Enable energy usage requests if --energy flag is set
@@ -971,6 +989,28 @@ func printCapabilities(acDevice *ac.AirConditioner) {
 	}
 
 	fmt.Println("╚════════════════════════════════════════╝")
+}
+
+// writeCapabilitiesToYAML writes device capabilities to a YAML file
+func writeCapabilitiesToYAML(acDevice *ac.AirConditioner, filename string) error {
+	// Get capabilities dictionary
+	caps := acDevice.CapabilitiesDict()
+	if caps == nil || len(caps) == 0 {
+		return fmt.Errorf("无能力信息")
+	}
+
+	// Convert to YAML
+	yamlData, err := yaml.Marshal(caps)
+	if err != nil {
+		return fmt.Errorf("转换 YAML 失败: %w", err)
+	}
+
+	// Write to file
+	if err := os.WriteFile(filename, yamlData, 0644); err != nil {
+		return fmt.Errorf("写入文件失败: %w", err)
+	}
+
+	return nil
 }
 
 func printACState(acDevice *ac.AirConditioner) {
