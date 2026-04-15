@@ -14,9 +14,22 @@ import (
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 	"github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
+	"github.com/RelicOfTesla/midea-msmart/msmart/device/cc"
 )
 
 var version = "1.0.0"
+
+// DeviceType string constants for CLI
+const (
+	DeviceTypeAC = "AC"  // Air Conditioner (空调)
+	DeviceTypeCC = "CC"  // Commercial Air Conditioner (商业空调)
+)
+
+// deviceTypeMap maps CLI device type strings to msmart DeviceType
+var deviceTypeMap = map[string]msmart.DeviceType{
+	DeviceTypeAC: msmart.DeviceTypeAirConditioner,
+	DeviceTypeCC: msmart.DeviceTypeCommercialAC,
+}
 
 func main() {
 	// Check for global verbose flag
@@ -35,6 +48,22 @@ func main() {
 	for i := 1; i < len(os.Args); i++ {
 		if os.Args[i] == "--region" && i+1 < len(os.Args) {
 			region = os.Args[i+1]
+			i++
+			break
+		}
+	}
+
+	// Parse global --device_type flag
+	deviceTypeStr := DeviceTypeAC // Default to AC (Air Conditioner)
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--device_type" && i+1 < len(os.Args) {
+			deviceTypeStr = strings.ToUpper(os.Args[i+1])
+			// Validate device type
+			if _, ok := deviceTypeMap[deviceTypeStr]; !ok {
+				fmt.Printf("❌ 不支持的设备类型: %s\n", os.Args[i+1])
+				fmt.Println("   支持的设备类型: AC (空调), CC (商业空调)")
+				os.Exit(1)
+			}
 			i++
 			break
 		}
@@ -69,23 +98,23 @@ func main() {
 	case "unbind":
 		handleUnbind(configPath)
 	case "status":
-		handleStatus(configPath)
+		handleStatus(configPath, deviceTypeStr)
 	case "on":
-		handlePower(configPath, true)
+		handlePower(configPath, true, deviceTypeStr)
 	case "off":
-		handlePower(configPath, false)
+		handlePower(configPath, false, deviceTypeStr)
 	case "temp":
-		handleTemp(configPath)
+		handleTemp(configPath, deviceTypeStr)
 	case "mode":
-		handleMode(configPath)
+		handleMode(configPath, deviceTypeStr)
 	case "fan":
-		handleFan(configPath)
+		handleFan(configPath, deviceTypeStr)
 	case "swing":
-		handleSwing(configPath)
+		handleSwing(configPath, deviceTypeStr)
 	case "set":
-		handleSet(configPath)
+		handleSet(configPath, deviceTypeStr)
 	case "query":
-		handleQuery(configPath)
+		handleQuery(configPath, deviceTypeStr)
 	case "download":
 		handleDownload(configPath, region)
 	default:
@@ -100,11 +129,12 @@ func printUsage() {
 midea - 美的空调控制 CLI v` + version + `
 
 用法:
-  midea [-v|--verbose] [--region <地区>] <command> [arguments]
+  midea [-v|--verbose] [--region <地区>] [--device_type <类型>] <command> [arguments]
 
 全局选项:
-  -v, --verbose    显示详细调试日志
-  --region <地区>  云端服务地区 (DE, KR, US), 默认: US
+  -v, --verbose        显示详细调试日志
+  --region <地区>      云端服务地区 (DE, KR, US), 默认: US
+  --device_type <类型> 设备类型: AC (空调), CC (商业空调), 默认: AC
 
 命令:
   discover [--auto-connect|-a] [--account <账号> --password <密码>]
@@ -445,7 +475,26 @@ func handleUnbind(configPath string) {
 // Device Control Commands
 // ============================================================================
 
-func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditioner) {
+// Device is a common interface for all device types
+// This allows command functions to work with different device types
+type Device interface {
+	// Basic device operations (these are common to all devices)
+	GetIP() string
+	GetPort() int
+}
+
+// mustGetACDevice extracts an AC device from interface{}, exits if not AC type
+func mustGetACDevice(device interface{}) *ac.AirConditioner {
+	acDevice, ok := device.(*ac.AirConditioner)
+	if !ok {
+		fmt.Println("❌ 此命令只支持空调设备 (AC)")
+		fmt.Println("💡 使用 --device_type AC 指定空调设备")
+		os.Exit(1)
+	}
+	return acDevice
+}
+
+func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Device, interface{}) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
@@ -459,6 +508,16 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 		os.Exit(1)
 	}
 
+	// Use device type from parameter, or from config, or default to AC
+	effectiveType := deviceTypeStr
+	if effectiveType == "" {
+		if device.Type == int(msmart.DeviceTypeCommercialAC) {
+			effectiveType = DeviceTypeCC
+		} else {
+			effectiveType = DeviceTypeAC // Default
+		}
+	}
+
 	// Parse device ID
 	deviceID, err := strconv.ParseInt(device.ID, 10, 64)
 	if err != nil {
@@ -466,46 +525,52 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 		os.Exit(1)
 	}
 
-	// Create AC device
-	acDevice := ac.NewAirConditioner(
-		device.IP,
-		device.Port,
-		int(deviceID),
-		msmart.WithName(device.Name),
-		msmart.WithVersion(device.Version),
-	)
+	// Create device based on type
+	switch effectiveType {
+	case DeviceTypeCC:
+		// Create Commercial Air Conditioner
+		ccDevice := cc.NewCommercialAirConditioner(device.IP, int(deviceID), device.Port)
+		fmt.Println("ℹ️  商业空调设备 (CC) 支持有限，部分命令可能不可用")
+		return device, ccDevice
+	default:
+		// Create Air Conditioner (default)
+		acDevice := ac.NewAirConditioner(
+			device.IP,
+			device.Port,
+			int(deviceID),
+			msmart.WithName(device.Name),
+			msmart.WithVersion(device.Version),
+		)
 
-	// Set token and key if available
-	// Note: Only authenticate if version is explicitly 3
-	// Version 0 or 2 devices use V2 protocol which doesn't need token/key authentication
-	if device.Version == 3 {
-		if device.Token == "" || device.Key == "" {
-			os.Exit(1)
-		}
+		// Set token and key if available (only for V3 devices)
+		if device.Version == 3 {
+			if device.Token == "" || device.Key == "" {
+				os.Exit(1)
+			}
 
-		token, err := hex.DecodeString(device.Token)
-		if err != nil {
-			fmt.Printf("❌ 无效的Token: %v\n", err)
-			os.Exit(1)
+			token, err := hex.DecodeString(device.Token)
+			if err != nil {
+				fmt.Printf("❌ 无效的Token: %v\n", err)
+				os.Exit(1)
+			}
+			key, err := hex.DecodeString(device.Key)
+			if err != nil {
+				fmt.Printf("❌ 无效的Key: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("🔐 正在认证...")
+			if err := acDevice.Authenticate(token, key); err != nil {
+				fmt.Printf("❌ 认证失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✅ 认证成功")
 		}
-		key, err := hex.DecodeString(device.Key)
-		if err != nil {
-			fmt.Printf("❌ 无效的Key: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("🔐 正在认证...")
-		if err := acDevice.Authenticate(token, key); err != nil {
-			fmt.Printf("❌ 认证失败: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("✅ 认证成功")
+		return device, acDevice
 	}
-
-	return device, acDevice
 }
 
 // getDeviceAuto automatically discovers a device and gets token/key for V3 devices
-func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.AirConditioner) {
+func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, interface{}) {
 	fmt.Printf("🔍 正在自动发现设备: %s\n", identifier)
 
 	// Create context with timeout
@@ -539,6 +604,8 @@ func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.Ai
 	deviceType := "未知设备"
 	if d.GetType() == msmart.DeviceTypeAirConditioner {
 		deviceType = "空调"
+	} else if d.GetType() == msmart.DeviceTypeCommercialAC {
+		deviceType = "商业空调"
 	}
 
 	// Get name
@@ -609,39 +676,57 @@ func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.Ai
 		fmt.Printf("⚠️  保存配置失败: %v\n", err)
 	}
 
-	// Create AC device
-	acDevice := ac.NewAirConditioner(
-		d.GetIP(),
-		d.GetPort(),
-		int(deviceID),
-		msmart.WithName(name),
-		msmart.WithVersion(version),
-	)
-
-	// Authenticate if V3
-	if version == 3 && token != "" && key != "" {
-		tokenBytes, err := hex.DecodeString(token)
-		if err != nil {
-			fmt.Printf("❌ 无效的Token: %v\n", err)
-			os.Exit(1)
+	// Use device type from parameter, or from discovered device, or default to AC
+	effectiveType := deviceTypeStr
+	if effectiveType == "" {
+		if d.GetType() == msmart.DeviceTypeCommercialAC {
+			effectiveType = DeviceTypeCC
+		} else {
+			effectiveType = DeviceTypeAC // Default
 		}
-		keyBytes, err := hex.DecodeString(key)
-		if err != nil {
-			fmt.Printf("❌ 无效的Key: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("🔐 正在认证...")
-		if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
-			fmt.Printf("❌ 认证失败: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("✅ 认证成功")
 	}
 
-	return device, acDevice
+	// Create device based on type
+	switch effectiveType {
+	case DeviceTypeCC:
+		// Create Commercial Air Conditioner
+		ccDevice := cc.NewCommercialAirConditioner(d.GetIP(), int(deviceID), d.GetPort())
+		fmt.Println("ℹ️  商业空调设备 (CC) 支持有限，部分命令可能不可用")
+		return device, ccDevice
+	default:
+		// Create Air Conditioner (default)
+		acDevice := ac.NewAirConditioner(
+			d.GetIP(),
+			d.GetPort(),
+			int(deviceID),
+			msmart.WithName(name),
+			msmart.WithVersion(version),
+		)
+
+		// Authenticate if V3
+		if version == 3 && token != "" && key != "" {
+			tokenBytes, err := hex.DecodeString(token)
+			if err != nil {
+				fmt.Printf("❌ 无效的Token: %v\n", err)
+				os.Exit(1)
+			}
+			keyBytes, err := hex.DecodeString(key)
+			if err != nil {
+				fmt.Printf("❌ 无效的Key: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("🔐 正在认证...")
+			if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
+				fmt.Printf("❌ 认证失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✅ 认证成功")
+		}
+		return device, acDevice
+	}
 }
 
-func handleStatus(configPath string) {
+func handleStatus(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities] [--energy]")
 		os.Exit(1)
@@ -665,15 +750,18 @@ func handleStatus(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
 		// Auto mode: discover device and get token/key automatically
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		// Normal mode: load from config
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device (currently only AC is fully supported)
+	acDevice := mustGetACDevice(deviceObj)
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
@@ -863,7 +951,7 @@ func printEnergyUsage(acDevice *ac.AirConditioner) {
 	fmt.Println("╚════════════════════════════════════════╝")
 }
 
-func handlePower(configPath string, on bool) {
+func handlePower(configPath string, on bool, deviceTypeStr string) {
 	if len(os.Args) < 3 {
 		action := "on"
 		if !on {
@@ -883,13 +971,16 @@ func handlePower(configPath string, on bool) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
@@ -914,7 +1005,7 @@ func handlePower(configPath string, on bool) {
 	fmt.Printf("✅ %s %s\n", device.Name, action)
 }
 
-func handleTemp(configPath string) {
+func handleTemp(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea temp <name|id> <温度> [--auto]")
 		fmt.Println("   温度范围: 16-30°C")
@@ -932,13 +1023,16 @@ func handleTemp(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	temp, err := strconv.ParseFloat(tempArg, 64)
 	if err != nil {
@@ -972,7 +1066,7 @@ func handleTemp(configPath string) {
 	fmt.Printf("✅ %s 温度已设置为 %.0f°C\n", device.Name, temp)
 }
 
-func handleMode(configPath string) {
+func handleMode(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea mode <name|id> <模式> [--auto]")
 		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
@@ -990,13 +1084,16 @@ func handleMode(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	// Map mode string to OperationalMode
 	modeMap := map[string]ac.OperationalMode{
@@ -1040,7 +1137,7 @@ func handleMode(configPath string) {
 	fmt.Printf("✅ %s 模式已设置为 %s\n", device.Name, modeNames[mode])
 }
 
-func handleFan(configPath string) {
+func handleFan(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea fan <name|id> <风速> [--auto]")
 		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
@@ -1058,13 +1155,16 @@ func handleFan(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	// Map speed string to FanSpeed
 	speedMap := map[string]ac.FanSpeed{
@@ -1108,7 +1208,7 @@ func handleFan(configPath string) {
 	fmt.Printf("✅ %s 风速已设置为 %s\n", device.Name, speedNames[speed])
 }
 
-func handleSwing(configPath string) {
+func handleSwing(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea swing <name|id> <模式> [--auto]")
 		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
@@ -1126,13 +1226,16 @@ func handleSwing(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	// Map swing string to SwingMode
 	swingMap := map[string]ac.SwingMode{
@@ -1175,7 +1278,7 @@ func handleSwing(configPath string) {
 }
 
 // handleSet handles the set command for multi-parameter control
-func handleSet(configPath string) {
+func handleSet(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea set <name|id> [选项] [--auto]")
 		fmt.Println("   选项:")
@@ -1202,13 +1305,16 @@ func handleSet(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	// Parse flags
 	var hasChanges bool
@@ -1360,7 +1466,7 @@ func handleSet(configPath string) {
 }
 
 // handleQuery handles the query command for querying device properties
-func handleQuery(configPath string) {
+func handleQuery(configPath string, deviceTypeStr string) {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea query <name|id> [key] [--all] [--auto]")
 		fmt.Println("   key: 属性名称 (如: temp, mode, fan, swing, power)")
@@ -1395,13 +1501,16 @@ func handleQuery(configPath string) {
 	}
 
 	var device *config.Device
-	var acDevice *ac.AirConditioner
+	var deviceObj interface{}
 
 	if autoMode {
-		device, acDevice = getDeviceAuto(identifier, configPath)
+		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, acDevice = getDevice(configPath, identifier)
+		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
 	}
+
+	// Get AC device
+	acDevice := mustGetACDevice(deviceObj)
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
