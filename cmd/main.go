@@ -84,6 +84,8 @@ func main() {
 		handleSwing(configPath)
 	case "set":
 		handleSet(configPath)
+	case "query":
+		handleQuery(configPath)
 	default:
 		fmt.Printf("❌ 未知命令: %s\n", command)
 		printUsage()
@@ -122,6 +124,11 @@ midea - 美的空调控制 CLI v` + version + `
   fan <name|id> <风速>        设置风速
   swing <name|id> <模式>      设置摆风模式
   set <name|id> [选项]        多参数设置 (一次设置多个属性)
+  query <name|id> [key] [--all] [--auto]
+                                查询设备属性
+                                key: 属性名称 (如: temp, mode, fan, swing, power)
+                                --all: 显示所有属性 (默认)
+                                --auto: 自动发现设备并获取token
 
 参数范围:
   温度: 16, 17, 18, ..., 29, 30 (°C)
@@ -1196,4 +1203,164 @@ func handleSet(configPath string) {
 	}
 
 	fmt.Printf("✅ %s 已设置: %s\n", device.Name, strings.Join(changes, ", "))
+}
+
+// handleQuery handles the query command for querying device properties
+func handleQuery(configPath string) {
+	if len(os.Args) < 3 {
+		fmt.Println("❌ 用法: midea query <name|id> [key] [--all] [--auto]")
+		fmt.Println("   key: 属性名称 (如: temp, mode, fan, swing, power)")
+		fmt.Println("   --all: 显示所有属性 (默认)")
+		fmt.Println("   --auto: 自动发现设备并获取token")
+		fmt.Println("")
+		fmt.Println("   示例:")
+		fmt.Println("     midea query 客厅              # 显示所有属性")
+		fmt.Println("     midea query 客厅 temp         # 只显示温度")
+		fmt.Println("     midea query 客厅 --auto       # 自动发现设备")
+		os.Exit(1)
+	}
+
+	// Parse flags and arguments
+	identifier := os.Args[2]
+	var key string
+	showAll := true
+	autoMode := false
+
+	// Parse arguments
+	for i := 3; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--all" {
+			showAll = true
+		} else if arg == "--auto" || arg == "-a" {
+			autoMode = true
+		} else if !strings.HasPrefix(arg, "--") {
+			// This is the key argument
+			key = arg
+			showAll = false
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
+
+	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
+	fmt.Println("🔌 正在连接...")
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Refresh state
+	if err := acDevice.Refresh(ctx); err != nil {
+		fmt.Printf("❌ 查询失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Display results
+	if showAll || key == "" {
+		printACState(acDevice)
+	} else {
+		printSpecificAttribute(acDevice, key)
+	}
+}
+
+func printSpecificAttribute(acDevice *ac.AirConditioner, key string) {
+	fmt.Println()
+
+	switch strings.ToLower(key) {
+	case "temp", "temperature", "target_temp":
+		fmt.Printf("🌡️  目标温度: %.0f°C\n", acDevice.TargetTemperature())
+
+	case "indoor_temp", "indoor_temperature":
+		if temp := acDevice.IndoorTemperature(); temp != nil {
+			fmt.Printf("🏠 室内温度: %.1f°C\n", *temp)
+		} else {
+			fmt.Println("⚠️  室内温度不可用")
+		}
+
+	case "outdoor_temp", "outdoor_temperature":
+		if temp := acDevice.OutdoorTemperature(); temp != nil {
+			fmt.Printf("🌤️  室外温度: %.1f°C\n", *temp)
+		} else {
+			fmt.Println("⚠️  室外温度不可用")
+		}
+
+	case "mode", "operational_mode":
+		modeNames := map[ac.OperationalMode]string{
+			ac.OperationalModeCool:    "制冷",
+			ac.OperationalModeHeat:    "制热",
+			ac.OperationalModeAuto:    "自动",
+			ac.OperationalModeDry:     "除湿",
+			ac.OperationalModeFanOnly: "送风",
+		}
+		fmt.Printf("🔄 运行模式: %s\n", modeNames[acDevice.OperationalMode()])
+
+	case "fan", "fan_speed":
+		fanSpeed := acDevice.FanSpeed()
+		var fanName string
+		switch fs := fanSpeed.(type) {
+		case ac.FanSpeed:
+			fanNames := map[ac.FanSpeed]string{
+				ac.FanSpeedAuto:   "自动",
+				ac.FanSpeedLow:    "低",
+				ac.FanSpeedMedium: "中",
+				ac.FanSpeedHigh:   "高",
+				ac.FanSpeedSilent: "静音",
+			}
+			fanName = fanNames[fs]
+		default:
+			fanName = fmt.Sprintf("%v", fs)
+		}
+		fmt.Printf("🌀 风速: %s\n", fanName)
+
+	case "swing", "swing_mode":
+		swingNames := map[ac.SwingMode]string{
+			ac.SwingModeOff:        "关闭",
+			ac.SwingModeVertical:   "上下摆风",
+			ac.SwingModeHorizontal: "左右摆风",
+			ac.SwingModeBoth:       "全方位摆风",
+		}
+		fmt.Printf("🔀 摆风模式: %s\n", swingNames[acDevice.SwingMode()])
+
+	case "power", "power_state":
+		if powerState := acDevice.PowerState(); powerState != nil && *powerState {
+			fmt.Println("⚡ 电源状态: 开启")
+		} else {
+			fmt.Println("⚡ 电源状态: 关闭")
+		}
+
+	case "eco":
+		if acDevice.Eco() {
+			fmt.Println("🌿 ECO模式: 开启")
+		} else {
+			fmt.Println("🌿 ECO模式: 关闭")
+		}
+
+	case "turbo":
+		if acDevice.Turbo() {
+			fmt.Println("🚀 强力模式: 开启")
+		} else {
+			fmt.Println("🚀 强力模式: 关闭")
+		}
+
+	default:
+		fmt.Printf("❌ 未知属性: %s\n", key)
+		fmt.Println("支持的属性:")
+		fmt.Println("  temp, temperature, target_temp       - 目标温度")
+		fmt.Println("  indoor_temp, indoor_temperature      - 室内温度")
+		fmt.Println("  outdoor_temp, outdoor_temperature    - 室外温度")
+		fmt.Println("  mode, operational_mode               - 运行模式")
+		fmt.Println("  fan, fan_speed                       - 风速")
+		fmt.Println("  swing, swing_mode                    - 摆风模式")
+		fmt.Println("  power, power_state                   - 电源状态")
+		fmt.Println("  eco                                  - ECO模式")
+		fmt.Println("  turbo                                - 强力模式")
+		os.Exit(1)
+	}
 }
