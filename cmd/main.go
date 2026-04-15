@@ -86,6 +86,8 @@ func main() {
 		handleSet(configPath)
 	case "query":
 		handleQuery(configPath)
+	case "download":
+		handleDownload(configPath, region)
 	default:
 		fmt.Printf("❌ 未知命令: %s\n", command)
 		printUsage()
@@ -129,6 +131,9 @@ midea - 美的空调控制 CLI v` + version + `
                                 key: 属性名称 (如: temp, mode, fan, swing, power)
                                 --all: 显示所有属性 (默认)
                                 --auto: 自动发现设备并获取token
+  download <host> [--account <账号> --password <密码>]
+                                下载设备的 Lua 协议和插件
+                                --account/--password: 美的账号密码 (下载需要)
 
 参数范围:
   温度: 16, 17, 18, ..., 29, 30 (°C)
@@ -161,6 +166,9 @@ set命令选项:
   # 多参数设置 (一次命令设置多个属性)
   midea set 客厅 --temp 26 --mode cool --fan high
   midea set 客厅 --power on --temp 24
+
+  # 下载设备协议和插件
+  midea download 192.168.1.60 --account your@email.com --password yourpass
 
 配置文件: 当前目录的 midea.json (优先) 或 ~/.config/midea/config.json
 `)
@@ -1461,4 +1469,127 @@ func printSpecificAttribute(acDevice *ac.AirConditioner, key string) {
 		fmt.Println("  turbo                                - 强力模式")
 		os.Exit(1)
 	}
+}
+
+// handleDownload handles the download command for downloading device protocol and plugin
+func handleDownload(configPath string, region string) {
+	if len(os.Args) < 3 {
+		fmt.Println("❌ 用法: midea download <host> [--account <账号> --password <密码>]")
+		os.Exit(1)
+	}
+
+	host := os.Args[2]
+
+	// Parse --account and --password flags
+	var account, password string
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--account":
+			if i+1 < len(os.Args) {
+				account = os.Args[i+1]
+				i++
+			}
+		case "--password":
+			if i+1 < len(os.Args) {
+				password = os.Args[i+1]
+				i++
+			}
+		}
+	}
+
+	fmt.Printf("🔍 正在发现设备: %s\n", host)
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Discover the device (no auto-connect, we just need SN)
+	discoverConfig := &msmart.DiscoverConfig{
+		Target:          host,
+		Timeout:         5 * time.Second,
+		DiscoveryPackets: 3,
+		AutoConnect:      false, // Don't connect, just discover
+	}
+
+	devices, err := msmart.Discover(ctx, discoverConfig)
+	if err != nil {
+		fmt.Printf("❌ 发现设备失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(devices) == 0 {
+		fmt.Println("❌ 未找到设备")
+		os.Exit(1)
+	}
+
+	// Get the first discovered device
+	d := devices[0]
+
+	// Get device info
+	deviceType := d.GetType()
+	sn := d.GetSN()
+
+	if sn == nil || *sn == "" {
+		fmt.Println("❌ 设备没有 SN，无法下载协议")
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ 发现设备: 类型=%02X, SN=%s\n", deviceType, *sn)
+
+	// Create cloud client
+	fmt.Println("☁️  正在连接云端...")
+
+	var cloud *msmart.SmartHomeCloud
+	var accountPtr, passwordPtr *string
+
+	if account != "" && password != "" {
+		accountPtr = &account
+		passwordPtr = &password
+	}
+
+	cloud, err = msmart.NewSmartHomeCloud(region, accountPtr, passwordPtr, false, nil)
+	if err != nil {
+		fmt.Printf("❌ 创建云端客户端失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Login to cloud
+	if err := cloud.Login(false); err != nil {
+		fmt.Printf("❌ 云端登录失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("✅ 云端登录成功")
+
+	// Download Lua protocol
+	fmt.Println("📥 正在下载 Lua 协议...")
+	luaName, luaContent, err := cloud.GetProtocolLua(deviceType, *sn)
+	if err != nil {
+		fmt.Printf("❌ 下载 Lua 协议失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save Lua file
+	if err := os.WriteFile(luaName, []byte(luaContent), 0644); err != nil {
+		fmt.Printf("❌ 保存 Lua 文件失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✅ Lua 协议已保存: %s\n", luaName)
+
+	// Download plugin
+	fmt.Println("📥 正在下载插件...")
+	pluginName, pluginData, err := cloud.GetPlugin(deviceType, *sn)
+	if err != nil {
+		fmt.Printf("❌ 下载插件失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save plugin file
+	if err := os.WriteFile(pluginName, pluginData, 0644); err != nil {
+		fmt.Printf("❌ 保存插件文件失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✅ 插件已保存: %s\n", pluginName)
+
+	fmt.Println("\n✅ 下载完成！")
 }
