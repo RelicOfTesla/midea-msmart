@@ -580,6 +580,8 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 		// Set token and key if available (only for V3 devices)
 		if device.Version == 3 {
 			if device.Token == "" || device.Key == "" {
+				fmt.Printf("❌ V3设备需要token和key进行认证\n")
+				fmt.Println("💡 使用 '--auto' 参数自动获取token/key，或使用 'midea discover --auto-connect' 重新发现设备")
 				os.Exit(1)
 			}
 
@@ -1193,7 +1195,10 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Use direct connection if deviceID, token and key are provided
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
@@ -1264,7 +1269,10 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Use direct connection if deviceID, token and key are provided
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
@@ -1335,7 +1343,10 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Use direct connection if deviceID, token and key are provided
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
@@ -1414,7 +1425,10 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Use direct connection if deviceID, token and key are provided
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
@@ -1610,7 +1624,10 @@ func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Use direct connection if deviceID, token and key are provided
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
