@@ -50,6 +50,72 @@ const DefaultDiscoveryPackets = 3
 // DiscoveryPorts are the ports used for discovery
 var DiscoveryPorts = []int{6445, 20086}
 
+// getBroadcastAddresses returns a list of broadcast addresses for all active network interfaces
+// If no interfaces are found, returns the default 255.255.255.255
+func getBroadcastAddresses() []string {
+	var addresses []string
+	
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		logger.Printf("Warning: failed to get network interfaces: %v", err)
+		return []string{IPv4Broadcast}
+	}
+	
+	for _, iface := range interfaces {
+		// Skip loopback and non-up interfaces
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		
+		for _, addr := range addrs {
+			// Only process IPv4 addresses
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			
+			// Convert to 4-byte representation
+			ip := ipNet.IP.To4()
+			if ip == nil {
+				continue // Not IPv4
+			}
+			
+			mask := ipNet.Mask
+			if len(mask) != 4 {
+				// Convert 16-byte mask to 4-byte mask
+				if len(mask) == 16 {
+					mask = mask[12:16]
+				} else {
+					continue
+				}
+			}
+			
+			// Calculate broadcast address: IP | (^Mask)
+			broadcast := make(net.IP, 4)
+			for i := 0; i < 4; i++ {
+				broadcast[i] = ip[i] | ^mask[i]
+			}
+			
+			broadcastStr := broadcast.String()
+			logger.Printf("Found broadcast address %s for interface %s (%s)", broadcastStr, iface.Name, ip)
+			addresses = append(addresses, broadcastStr)
+		}
+	}
+	
+	// If no interfaces found, use the default broadcast address
+	if len(addresses) == 0 {
+		logger.Printf("No suitable network interfaces found, using default broadcast address")
+		return []string{IPv4Broadcast}
+	}
+	
+	return addresses
+}
+
 // DeviceInfo represents discovered device information
 type DeviceInfo struct {
 	IP         string
@@ -117,11 +183,21 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	if config.Target == IPv4Broadcast {
 		if syscallConn, ok := conn.(syscall.Conn); ok {
 			rawConn, err := syscallConn.SyscallConn()
-			if err == nil {
+			if err != nil {
+				logger.Printf("Warning: failed to get syscall connection: %v", err)
+			} else {
+				var setsockoptErr error
 				rawConn.Control(func(fd uintptr) {
-					setBroadcastOption(fd)
+					setsockoptErr = setBroadcastOption(fd)
 				})
+				if setsockoptErr != nil {
+					logger.Printf("Warning: failed to set SO_BROADCAST option: %v", setsockoptErr)
+				} else {
+					logger.Printf("SO_BROADCAST option set successfully")
+				}
 			}
+		} else {
+			logger.Printf("Warning: connection does not implement syscall.Conn")
 		}
 	}
 
@@ -147,17 +223,24 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	}()
 
 	// Send discovery messages
+	// Get broadcast addresses for all network interfaces
+	broadcastAddresses := getBroadcastAddresses()
+	logger.Printf("Sending discovery to %d broadcast addresses: %v", len(broadcastAddresses), broadcastAddresses)
+	
 	for _, port := range DiscoveryPorts {
-		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", config.Target, port))
-		if err != nil {
-			continue
-		}
+		for _, broadcastAddr := range broadcastAddresses {
+			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", broadcastAddr, port))
+			if err != nil {
+				logger.Printf("Failed to resolve address %s:%d: %v", broadcastAddr, port, err)
+				continue
+			}
 
-		logger.Printf("Discovery sent to %s:%d.", config.Target, port)
+			logger.Printf("Discovery sent to %s:%d.", broadcastAddr, port)
 
-		for i := 0; i < config.DiscoveryPackets; i++ {
-			if _, err := conn.WriteTo(DiscoveryMsg, addr); err != nil {
-				logger.Printf("Failed to send discovery to %s:%d: %v", config.Target, port, err)
+			for i := 0; i < config.DiscoveryPackets; i++ {
+				if _, err := conn.WriteTo(DiscoveryMsg, addr); err != nil {
+					logger.Printf("Failed to send discovery to %s:%d: %v", broadcastAddr, port, err)
+				}
 			}
 		}
 	}
@@ -489,9 +572,11 @@ func DiscoverSingle(ctx context.Context, host string, config *DiscoverConfig) (*
 		return nil, err
 	}
 
-	// Return first discovered device
-	if len(devices) > 0 {
-		return devices[0], nil
+	// Find the device matching the target host
+	for _, device := range devices {
+		if device.GetIP() == host {
+			return device, nil
+		}
 	}
 
 	return nil, nil

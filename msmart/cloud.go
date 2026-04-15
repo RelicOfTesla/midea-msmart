@@ -74,6 +74,14 @@ type BaseCloud struct {
 	loginID         *string
 	session         map[string]interface{}
 	getAsyncClient  func() *http.Client
+
+	// parseResponseFunc is the function to parse HTTP responses
+	// This allows subclasses to override the parsing behavior
+	parseResponseFunc func(*http.Response) (interface{}, error)
+
+	// apiRequestFunc is the function to make API requests
+	// This allows subclasses to override the request behavior
+	apiRequestFunc func(endpoint string, body map[string]interface{}) (map[string]interface{}, error)
 }
 
 // NewBaseCloud creates a new BaseCloud instance
@@ -87,6 +95,8 @@ func NewBaseCloud(baseURL string, region *string, account *string, password *str
 		RETRIES:          3,
 		CLOUD_CREDENTIALS: make(map[string][2]string),
 		getAsyncClient:   getAsyncClient,
+		parseResponseFunc: nil, // Will be set by subclasses
+		apiRequestFunc:    nil, // Will be set by subclasses
 	}
 
 	// Validate incoming credentials and region
@@ -127,8 +137,11 @@ func (bc *BaseCloud) timestamp() string {
 }
 
 // parseResponse parses a response from the cloud.
-// This method should be overridden by subclasses
+// This method uses the parseResponseFunc if set, otherwise returns not implemented
 func (bc *BaseCloud) parseResponse(response *http.Response) (interface{}, error) {
+	if bc.parseResponseFunc != nil {
+		return bc.parseResponseFunc(response)
+	}
 	return nil, errors.New("not implemented")
 }
 
@@ -203,8 +216,11 @@ func (bc *BaseCloud) postRequest(urlStr string, headers map[string]string, rawDa
 }
 
 // apiRequest makes a request to the cloud and return the results.
-// This method should be overridden by subclasses
+// This method uses the apiRequestFunc if set, otherwise returns not implemented
 func (bc *BaseCloud) apiRequest(endpoint string, body map[string]interface{}) (map[string]interface{}, error) {
+	if bc.apiRequestFunc != nil {
+		return bc.apiRequestFunc(endpoint, body)
+	}
 	return nil, errors.New("not implemented")
 }
 
@@ -455,6 +471,23 @@ func NewSmartHomeCloud(region string, account *string, password *string, useChin
 		baseURL = "https://mp-prod.smartmidea.net"
 	}
 
+	// Pre-define cloud credentials before creating BaseCloud
+	cloudCredentials := map[string][2]string{
+		"DE": {"midea_eu@mailinator.com", "das_ist_passwort1"},
+		"KR": {"midea_sea@mailinator.com", "password_for_sea1"},
+		"US": {"midea@mailinator.com", "this_is_a_password1"},
+	}
+
+	// Use default credentials if no account/password provided
+	if account == nil || password == nil {
+		creds, ok := cloudCredentials[region]
+		if !ok {
+			return nil, fmt.Errorf("unknown cloud region '%s'", region)
+		}
+		account = &creds[0]
+		password = &creds[1]
+	}
+
 	bc, err := NewBaseCloud(baseURL, &region, account, password, getAsyncClient)
 	if err != nil {
 		return nil, err
@@ -471,12 +504,14 @@ func NewSmartHomeCloud(region string, account *string, password *string, useChin
 		security:       NewSmartHomeCloudSecurity(useChinaServer),
 	}
 
-	// Set cloud credentials
-	bc.CLOUD_CREDENTIALS = map[string][2]string{
-		"DE": {"midea_eu@mailinator.com", "das_ist_passwort1"},
-		"KR": {"midea_sea@mailinator.com", "password_for_sea1"},
-		"US": {"midea@mailinator.com", "this_is_a_password1"},
-	}
+	// Set cloud credentials for reference
+	bc.CLOUD_CREDENTIALS = cloudCredentials
+
+	// Set the parseResponse function for this cloud type
+	bc.parseResponseFunc = shc.parseResponse
+
+	// Set the apiRequest function for this cloud type
+	bc.apiRequestFunc = shc.apiRequest
 
 	return shc, nil
 }
@@ -821,6 +856,23 @@ func (s *NetHomePlusCloudSecurity) EncryptPassword(loginID string, password stri
 func NewNetHomePlusCloud(region string, account *string, password *string, getAsyncClient func() *http.Client) (*NetHomePlusCloud, error) {
 	baseURL := "https://mapp.appsmb.com"
 
+	// Pre-define cloud credentials before creating BaseCloud
+	cloudCredentials := map[string][2]string{
+		"DE": {"nethome+de@mailinator.com", "password1"},
+		"KR": {"nethome+sea@mailinator.com", "password1"},
+		"US": {"nethome+us@mailinator.com", "password1"},
+	}
+
+	// Use default credentials if no account/password provided
+	if account == nil || password == nil {
+		creds, ok := cloudCredentials[region]
+		if !ok {
+			return nil, fmt.Errorf("unknown cloud region '%s'", region)
+		}
+		account = &creds[0]
+		password = &creds[1]
+	}
+
 	bc, err := NewBaseCloud(baseURL, &region, account, password, getAsyncClient)
 	if err != nil {
 		return nil, err
@@ -836,12 +888,14 @@ func NewNetHomePlusCloud(region string, account *string, password *string, getAs
 		security:  NewNetHomePlusCloudSecurity(),
 	}
 
-	// Set cloud credentials
-	bc.CLOUD_CREDENTIALS = map[string][2]string{
-		"DE": {"nethome+de@mailinator.com", "password1"},
-		"KR": {"nethome+sea@mailinator.com", "password1"},
-		"US": {"nethome+us@mailinator.com", "password1"},
-	}
+	// Set cloud credentials for reference
+	bc.CLOUD_CREDENTIALS = cloudCredentials
+
+	// Set the parseResponse function for this cloud type
+	bc.parseResponseFunc = nhpc.parseResponse
+
+	// Set the apiRequest function for this cloud type
+	bc.apiRequestFunc = nhpc.apiRequest
 
 	return nhpc, nil
 }

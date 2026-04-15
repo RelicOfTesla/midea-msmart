@@ -78,8 +78,9 @@ midea - 美的空调控制 CLI v` + version + `
   midea <command> [arguments]
 
 命令:
-  discover                    发现设备并保存到配置
-  list                        列出已保存的设备
+  discover [--auto-connect|-a]   发现设备并保存到配置
+                                --auto-connect: 自动连接并获取V3设备的token
+  list                          列出已保存的设备
   bind <id|sn|ip> -n <名称>   绑定设备别名
   unbind <name|id>            解绑设备
   
@@ -107,6 +108,7 @@ set命令选项:
 
 示例:
   midea discover                      # 发现局域网内的设备
+  midea discover --auto-connect      # 发现设备并自动获取V3设备token
   midea list                          # 列出已保存的设备
   midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备，命名为"客厅"
   midea status 客厅                   # 查询"客厅"空调状态
@@ -140,11 +142,20 @@ func handleDiscover(configPath string) {
 		os.Exit(1)
 	}
 
+	// Check for --auto-connect flag
+	autoConnect := false
+	for _, arg := range os.Args[2:] {
+		if arg == "--auto-connect" || arg == "-a" {
+			autoConnect = true
+			break
+		}
+	}
+
 	// Discover devices
 	devices, err := msmart.Discover(ctx, &msmart.DiscoverConfig{
 		Timeout:          5 * time.Second,
 		DiscoveryPackets: 3,
-		AutoConnect:      false,
+		AutoConnect:      autoConnect,
 	})
 
 	// Even if there's an error, check if we discovered any devices
@@ -198,6 +209,11 @@ func handleDiscover(configPath string) {
 		}
 		if k := d.GetKey(); k != nil {
 			key = *k
+		}
+
+		// For V3 devices without tokens, show a warning
+		if version == 3 && token == "" {
+			fmt.Printf("  ⚠️  V3设备需要云端认证。使用 'midea discover --auto-connect' 获取token。\n")
 		}
 
 		// Check if device already exists in config
@@ -397,7 +413,13 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 	// Set token and key if available
 	// Note: Only authenticate if version is explicitly 3
 	// Version 0 or 2 devices use V2 protocol which doesn't need token/key authentication
-	if device.Token != "" && device.Key != "" && device.Version == 3 {
+	if device.Version == 3 {
+		if device.Token == "" || device.Key == "" {
+			fmt.Println("❌ V3设备需要token和key进行认证")
+			fmt.Println("💡 请使用 'midea discover --auto-connect' 获取token")
+			os.Exit(1)
+		}
+
 		token, err := hex.DecodeString(device.Token)
 		if err != nil {
 			fmt.Printf("❌ 无效的Token: %v\n", err)
