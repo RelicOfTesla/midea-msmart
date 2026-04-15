@@ -1121,7 +1121,7 @@ func handleSwing(configPath string) {
 // handleSet handles the set command for multi-parameter control
 func handleSet(configPath string) {
 	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea set <name|id> [选项]")
+		fmt.Println("❌ 用法: midea set <name|id> [选项] [--auto]")
 		fmt.Println("   选项:")
 		fmt.Println("     --temp <温度>      设置温度 (16-30°C)")
 		fmt.Println("     --mode <模式>      设置模式 (cool/heat/auto/dry/fan)")
@@ -1135,7 +1135,24 @@ func handleSet(configPath string) {
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
+	for i := 3; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+			break
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
 
 	// Parse flags
 	var hasChanges bool
