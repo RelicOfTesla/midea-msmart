@@ -115,13 +115,12 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 
 	// Set broadcast option
 	if config.Target == IPv4Broadcast {
-		if udpConn, ok := conn.(*net.UDPConn); ok {
-			// Get file descriptor for setting SO_BROADCAST
-			file, err := udpConn.File()
+		if syscallConn, ok := conn.(syscall.Conn); ok {
+			rawConn, err := syscallConn.SyscallConn()
 			if err == nil {
-				fd := int(file.Fd())
-				syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
-				file.Close()
+				rawConn.Control(func(fd uintptr) {
+					setBroadcastOption(fd)
+				})
 			}
 		}
 	}
@@ -135,6 +134,10 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 
 	// WaitGroup to track goroutines
 	var wg sync.WaitGroup
+
+	// Create a cancelable context for the response handler
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	// Start a goroutine to handle responses
 	wg.Add(1)
@@ -163,15 +166,21 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	select {
 	case <-time.After(config.Timeout):
 		logger.Printf("Discovery timeout after %s", config.Timeout)
+		// Cancel the context to stop the response handler
+		cancel()
 	case <-ctx.Done():
 		logger.Printf("Discovery cancelled")
 	}
+
+	logger.Printf("Closing connection and waiting for response handler...")
 
 	// Close the connection to stop the receive goroutine
 	conn.Close()
 
 	// Wait for the response handler to finish
 	wg.Wait()
+
+	logger.Printf("Response handler finished, collecting results...")
 
 	// Close the results channel
 	close(results)
@@ -203,12 +212,6 @@ func handleDiscoveryResponses(ctx context.Context, conn net.PacketConn, discover
 	buf := make([]byte, 4096)
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
 		// Set read deadline
 		if err := conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
 			return
@@ -217,10 +220,23 @@ func handleDiscoveryResponses(ctx context.Context, conn net.PacketConn, discover
 		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
+				// Check if context is cancelled before continuing
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					continue
+				}
 			}
 			// Connection closed or other error
 			return
+		}
+
+		// Check if context is cancelled after successful read
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
 
 		if n == 0 {
@@ -384,8 +400,13 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 	// Extract encrypted payload
 	encryptedData := dataView[40 : len(dataView)-16]
 
-	// Extract ID
-	deviceID := int(binary.LittleEndian.Uint32(dataView[20:24]))
+	// Extract ID (6 bytes, little endian) - matches Python implementation
+	// Python: device_id = int.from_bytes(data_mv[20:26], "little")
+	if len(dataView) < 26 {
+		return nil, NewDiscoverError("data too short for device ID", nil)
+	}
+	deviceID := int(binary.LittleEndian.Uint16(dataView[20:22]))
+	deviceID |= int(binary.LittleEndian.Uint32(dataView[22:26])) << 16
 
 	// Attempt to decrypt the packet
 	decryptedData, err := SecurityDecryptAES(encryptedData)

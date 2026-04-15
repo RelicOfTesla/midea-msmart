@@ -2,7 +2,6 @@
 /midea-test
 /midea
 /pkg
-/cmd
 /msmart/TODO.md
 /DEVELOPMENT_PLAN.md
 /TODO.md
@@ -11,3 +10,4 @@
 /*.py
 /docs/task-driver-report
 /tests.test
+/*.md
