@@ -172,10 +172,11 @@ midea - 美的空调控制 CLI v` + version + `
   --device_type <类型> 设备类型: AC (空调), CC (商业空调), 默认: AC
 
 命令:
-  discover [<host>] [--auto-connect|-a] [--account <账号> --password <密码>]
+  discover [<host>] [--auto-connect|-a] [--count <数量>] [--account <账号> --password <密码>]
                                 发现设备并保存到配置
                                 <host>: 可选，指定目标设备IP (发现单个设备)
                                 --auto-connect: 自动连接并获取V3设备的token
+                                --count: 广播包数量 (默认: 3)
                                 --account/--password: 美的账号密码 (V3设备认证需要)
   list                          列出已保存的设备
   bind <id|sn|ip> -n <名称>   绑定设备别名
@@ -262,6 +263,7 @@ func handleDiscover(configPath string, region string) {
 	// Parse host argument and flags
 	autoConnect := false
 	var account, password, targetHost string
+	discoveryCount := 3 // Default number of broadcast packets
 	for i := 2; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		switch arg {
@@ -277,6 +279,16 @@ func handleDiscover(configPath string, region string) {
 				password = os.Args[i+1]
 				i++
 			}
+		case "--count":
+			if i+1 < len(os.Args) {
+				count, err := strconv.Atoi(os.Args[i+1])
+				if err != nil || count < 1 {
+					fmt.Printf("❌ 无效的 count 值: %s (应为正整数)\n", os.Args[i+1])
+					os.Exit(1)
+				}
+				discoveryCount = count
+				i++
+			}
 		default:
 			// First non-flag argument is the target host
 			if !strings.HasPrefix(arg, "-") && targetHost == "" {
@@ -288,7 +300,7 @@ func handleDiscover(configPath string, region string) {
 	// Discover devices
 	discoverConfig := &msmart.DiscoverConfig{
 		Timeout:          5 * time.Second,
-		DiscoveryPackets: 3,
+		DiscoveryPackets: discoveryCount,
 		AutoConnect:      autoConnect,
 		Region:           region,
 	}
