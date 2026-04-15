@@ -111,7 +111,10 @@ midea - 美的空调控制 CLI v` + version + `
   bind <id|sn|ip> -n <名称>   绑定设备别名
   unbind <name|id>            解绑设备
   
-  status <name|id>            查询设备状态
+  status <name|id> [--auto] [--capabilities]
+                                查询设备状态
+                                --auto: 自动发现设备并获取token
+                                --capabilities: 显示设备能力信息
   on <name|id>                开机
   off <name|id>               关机
   temp <name|id> <温度>       设置温度 (范围: 16-30°C)
@@ -141,6 +144,7 @@ set命令选项:
   midea list                          # 列出已保存的设备
   midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备，命名为"客厅"
   midea status 客厅                   # 查询"客厅"空调状态
+  midea status 客厅 --capabilities    # 查询"客厅"空调状态并显示设备能力
   midea on 客厅                       # 打开"客厅"空调
   midea temp 客厅 26                  # 设置温度为26°C
   midea mode 客厅 cool                # 设置为制冷模式
@@ -258,11 +262,6 @@ func handleDiscover(configPath string, region string) {
 		}
 		if k := d.GetKey(); k != nil {
 			key = *k
-		}
-
-		// For V3 devices without tokens, show a warning
-		if version == 3 && token == "" {
-			fmt.Printf("  ⚠️  V3设备需要云端认证。使用 'midea discover --auto-connect' 获取token。\n")
 		}
 
 		// Check if device already exists in config
@@ -464,8 +463,6 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 	// Version 0 or 2 devices use V2 protocol which doesn't need token/key authentication
 	if device.Version == 3 {
 		if device.Token == "" || device.Key == "" {
-			fmt.Println("❌ V3设备需要token和key进行认证")
-			fmt.Println("💡 请使用 'midea status <ip> --auto' 自动获取token")
 			os.Exit(1)
 		}
 
@@ -558,8 +555,6 @@ func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.Ai
 
 	// Check if it's a V3 device
 	if version == 3 && (token == "" || key == "") {
-		fmt.Println("❌ V3设备需要token和key进行认证，但自动获取失败")
-		fmt.Println("💡 请尝试使用 'midea discover --auto-connect' 命令")
 		os.Exit(1)
 	}
 
@@ -631,16 +626,20 @@ func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.Ai
 
 func handleStatus(configPath string) {
 	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea status <name|id> [--auto]")
+		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities]")
 		os.Exit(1)
 	}
 
-	// Parse --auto flag
+	// Parse --auto and --capabilities flags
 	autoMode := false
+	showCapabilities := false
 	identifier := os.Args[2]
 	for i := 3; i < len(os.Args); i++ {
 		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
 			autoMode = true
+		}
+		if os.Args[i] == "--capabilities" {
+			showCapabilities = true
 		}
 	}
 
@@ -665,6 +664,9 @@ func handleStatus(configPath string) {
 	// Get capabilities first
 	if err := acDevice.GetCapabilities(ctx); err != nil {
 		fmt.Printf("⚠️  获取设备能力失败: %v\n", err)
+	} else if showCapabilities {
+		// Display capabilities if requested
+		printCapabilities(acDevice)
 	}
 
 	// Refresh state
@@ -674,6 +676,55 @@ func handleStatus(configPath string) {
 	}
 
 	printACState(acDevice)
+}
+
+func printCapabilities(acDevice *ac.AirConditioner) {
+	fmt.Println("\n╔════════════════════════════════════════╗")
+	fmt.Println("║         📋 设备能力信息                ║")
+	fmt.Println("╠════════════════════════════════════════╣")
+
+	// Get capabilities dictionary
+	caps := acDevice.CapabilitiesDict()
+	if caps == nil || len(caps) == 0 {
+		fmt.Println("║  ⚠️  无能力信息                        ║")
+		fmt.Println("╚════════════════════════════════════════╝")
+		return
+	}
+
+	// Display supported features
+	if flags, ok := caps["supported_features"].([]string); ok && len(flags) > 0 {
+		fmt.Println("║  支持的功能:                           ║")
+		for _, flag := range flags {
+			fmt.Printf("║    • %-32s║\n", flag)
+		}
+	}
+
+	// Display supported modes
+	if modes, ok := caps["supported_modes"].([]string); ok && len(modes) > 0 {
+		fmt.Println("║  支持的模式:                           ║")
+		fmt.Printf("║    %s                                ║\n", strings.Join(modes, ", "))
+	}
+
+	// Display supported fan speeds
+	if fans, ok := caps["supported_fan_speeds"].([]string); ok && len(fans) > 0 {
+		fmt.Println("║  支持的风速:                           ║")
+		fmt.Printf("║    %s                                ║\n", strings.Join(fans, ", "))
+	}
+
+	// Display supported swing modes
+	if swings, ok := caps["supported_swing_modes"].([]string); ok && len(swings) > 0 {
+		fmt.Println("║  支持的摆风:                           ║")
+		fmt.Printf("║    %s                              ║\n", strings.Join(swings, ", "))
+	}
+
+	// Display temperature range
+	if minTemp, ok := caps["min_temperature"].(int); ok {
+		if maxTemp, ok := caps["max_temperature"].(int); ok {
+			fmt.Printf("║  温度范围: %d°C - %d°C                 ║\n", minTemp, maxTemp)
+		}
+	}
+
+	fmt.Println("╚════════════════════════════════════════╝")
 }
 
 func printACState(acDevice *ac.AirConditioner) {
