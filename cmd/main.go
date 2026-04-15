@@ -813,11 +813,27 @@ func handlePower(configPath string, on bool) {
 		if !on {
 			action = "off"
 		}
-		fmt.Printf("❌ 用法: midea %s <name|id>\n", action)
+		fmt.Printf("❌ 用法: midea %s <name|id> [--auto]\n", action)
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
+	for i := 3; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
@@ -844,14 +860,31 @@ func handlePower(configPath string, on bool) {
 
 func handleTemp(configPath string) {
 	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea temp <name|id> <温度>")
+		fmt.Println("❌ 用法: midea temp <name|id> <温度> [--auto]")
 		fmt.Println("   温度范围: 16-30°C")
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
+	tempArg := os.Args[3]
+	for i := 4; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+		}
+	}
 
-	temp, err := strconv.ParseFloat(os.Args[3], 64)
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
+
+	temp, err := strconv.ParseFloat(tempArg, 64)
 	if err != nil {
 		fmt.Println("❌ 无效的温度值")
 		fmt.Println("   温度范围: 16-30°C")
@@ -885,13 +918,29 @@ func handleTemp(configPath string) {
 
 func handleMode(configPath string) {
 	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea mode <name|id> <模式>")
+		fmt.Println("❌ 用法: midea mode <name|id> <模式> [--auto]")
 		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
-	modeStr := os.Args[3]
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
+	modeArg := os.Args[3]
+	for i := 4; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
 
 	// Map mode string to OperationalMode
 	modeMap := map[string]ac.OperationalMode{
@@ -902,9 +951,9 @@ func handleMode(configPath string) {
 		"fan":  ac.OperationalModeFanOnly,
 	}
 
-	mode, ok := modeMap[modeStr]
+	mode, ok := modeMap[modeArg]
 	if !ok {
-		fmt.Printf("❌ 未知模式: %s\n", modeStr)
+		fmt.Printf("❌ 未知模式: %s\n", modeArg)
 		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
 		os.Exit(1)
 	}
@@ -937,13 +986,29 @@ func handleMode(configPath string) {
 
 func handleFan(configPath string) {
 	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea fan <name|id> <风速>")
+		fmt.Println("❌ 用法: midea fan <name|id> <风速> [--auto]")
 		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
 	speedStr := os.Args[3]
+	for i := 4; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
 
 	// Map speed string to FanSpeed
 	speedMap := map[string]ac.FanSpeed{
@@ -989,13 +1054,29 @@ func handleFan(configPath string) {
 
 func handleSwing(configPath string) {
 	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea swing <name|id> <模式>")
+		fmt.Println("❌ 用法: midea swing <name|id> <模式> [--auto]")
 		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
 	swingStr := os.Args[3]
+	for i := 4; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		device, acDevice = getDevice(configPath, identifier)
+	}
 
 	// Map swing string to SwingMode
 	swingMap := map[string]ac.SwingMode{
