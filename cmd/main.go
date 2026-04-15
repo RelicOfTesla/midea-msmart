@@ -61,7 +61,7 @@ func main() {
 	// Execute command
 	switch command {
 	case "discover":
-		handleDiscover(configPath)
+		handleDiscover(configPath, region)
 	case "list":
 		handleList(configPath)
 	case "bind":
@@ -96,10 +96,11 @@ func printUsage() {
 midea - 美的空调控制 CLI v` + version + `
 
 用法:
-  midea [-v|--verbose] <command> [arguments]
+  midea [-v|--verbose] [--region <地区>] <command> [arguments]
 
 全局选项:
   -v, --verbose    显示详细调试日志
+  --region <地区>  云端服务地区 (DE, KR, US), 默认: US
 
 命令:
   discover [--auto-connect|-a] [--account <账号> --password <密码>]
@@ -158,7 +159,7 @@ set命令选项:
 // Discovery Commands
 // ============================================================================
 
-func handleDiscover(configPath string) {
+func handleDiscover(configPath string, region string) {
 	fmt.Println("🔍 正在发现设备...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -195,6 +196,7 @@ func handleDiscover(configPath string) {
 		Timeout:          5 * time.Second,
 		DiscoveryPackets: 3,
 		AutoConnect:      autoConnect,
+		Region:           region,
 	}
 	
 	// Set account and password if provided
