@@ -114,11 +114,12 @@ midea - 美的空调控制 CLI v` + version + `
   list                          列出已保存的设备
   bind <id|sn|ip> -n <名称>   绑定设备别名
   unbind <name|id>            解绑设备
-  
-  status <name|id> [--auto] [--capabilities]
+
+  status <name|id> [--auto] [--capabilities] [--energy]
                                 查询设备状态
                                 --auto: 自动发现设备并获取token
                                 --capabilities: 显示设备能力信息
+                                --energy: 显示能耗信息
   on <name|id>                开机
   off <name|id>               关机
   temp <name|id> <温度>       设置温度 (范围: 16-30°C)
@@ -154,10 +155,11 @@ set命令选项:
   midea discover --auto-connect --account your@email.com --password yourpass
                                       # 使用自定义账号发现设备
   midea list                          # 列出已保存的设备
-  midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备，命名为"客厅"
-  midea status 客厅                   # 查询"客厅"空调状态
-  midea status 客厅 --capabilities    # 查询"客厅"空调状态并显示设备能力
-  midea on 客厅                       # 打开"客厅"空调
+  midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备,命名为"客厅"
+  midea status 客厅                   # 查询“客厅”空调状态
+  midea status 客厅 --capabilities    # 查询“客厅”空调状态并显示设备能力
+  midea status 客厅 --energy          # 查询“客厅”空调状态并显示能耗信息
+  midea on 客厅                       # 打开“客厅”空调
   midea temp 客厅 26                  # 设置温度为26°C
   midea mode 客厅 cool                # 设置为制冷模式
   midea fan 客厅 high                 # 设置为高风速
@@ -217,7 +219,7 @@ func handleDiscover(configPath string, region string) {
 		AutoConnect:      autoConnect,
 		Region:           region,
 	}
-	
+
 	// Set account and password if provided
 	if account != "" && password != "" {
 		discoverConfig.Account = account
@@ -641,13 +643,14 @@ func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.Ai
 
 func handleStatus(configPath string) {
 	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities]")
+		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities] [--energy]")
 		os.Exit(1)
 	}
 
-	// Parse --auto and --capabilities flags
+	// Parse --auto, --capabilities and --energy flags
 	autoMode := false
 	showCapabilities := false
+	showEnergy := false
 	identifier := os.Args[2]
 	for i := 3; i < len(os.Args); i++ {
 		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
@@ -655,6 +658,9 @@ func handleStatus(configPath string) {
 		}
 		if os.Args[i] == "--capabilities" {
 			showCapabilities = true
+		}
+		if os.Args[i] == "--energy" {
+			showEnergy = true
 		}
 	}
 
@@ -684,6 +690,11 @@ func handleStatus(configPath string) {
 		printCapabilities(acDevice)
 	}
 
+	// Enable energy usage requests if --energy flag is set
+	if showEnergy {
+		acDevice.SetEnableEnergyUsageRequests(true)
+	}
+
 	// Refresh state
 	if err := acDevice.Refresh(ctx); err != nil {
 		fmt.Printf("❌ 查询失败: %v\n", err)
@@ -691,6 +702,11 @@ func handleStatus(configPath string) {
 	}
 
 	printACState(acDevice)
+
+	// Display energy usage if requested
+	if showEnergy {
+		printEnergyUsage(acDevice)
+	}
 }
 
 func printCapabilities(acDevice *ac.AirConditioner) {
@@ -810,6 +826,38 @@ func printACState(acDevice *ac.AirConditioner) {
 	}
 	if acDevice.Turbo() {
 		fmt.Println("║  🚀 强力模式: 开启                     ║")
+	}
+
+	fmt.Println("╚════════════════════════════════════════╝")
+}
+
+func printEnergyUsage(acDevice *ac.AirConditioner) {
+	fmt.Println("\n╔════════════════════════════════════════╗")
+	fmt.Println("║           ⚡ 能耗信息                  ║")
+	fmt.Println("╠════════════════════════════════════════╣")
+
+	hasEnergyData := false
+
+	// Real-time power
+	if power := acDevice.GetRealTimePowerUsage(ac.EnergyDataFormatBCD); power != nil {
+		fmt.Printf("║  实时功率: %.1f W                      ║\n", *power)
+		hasEnergyData = true
+	}
+
+	// Current energy usage (current month)
+	if current := acDevice.GetCurrentEnergyUsage(ac.EnergyDataFormatBCD); current != nil {
+		fmt.Printf("║  本月能耗: %.2f kWh                    ║\n", *current)
+		hasEnergyData = true
+	}
+
+	// Total energy usage
+	if total := acDevice.GetTotalEnergyUsage(ac.EnergyDataFormatBCD); total != nil {
+		fmt.Printf("║  累计能耗: %.2f kWh                    ║\n", *total)
+		hasEnergyData = true
+	}
+
+	if !hasEnergyData {
+		fmt.Println("║  ⚠️  无能耗数据                        ║")
 	}
 
 	fmt.Println("╚════════════════════════════════════════╝")
@@ -1530,7 +1578,7 @@ func handleDownload(configPath string, region string) {
 	sn := d.GetSN()
 
 	if sn == nil || *sn == "" {
-		fmt.Println("❌ 设备没有 SN，无法下载协议")
+		fmt.Println("❌ 设备没有 SN,无法下载协议")
 		os.Exit(1)
 	}
 
@@ -1591,5 +1639,5 @@ func handleDownload(configPath string, region string) {
 	}
 	fmt.Printf("✅ 插件已保存: %s\n", pluginName)
 
-	fmt.Println("\n✅ 下载完成！")
+	fmt.Println("\n✅ 下载完成!")
 }
