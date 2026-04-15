@@ -69,6 +69,41 @@ func main() {
 		}
 	}
 
+	// Parse global --id flag (Device ID for V3 devices)
+	deviceID := 0
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--id" && i+1 < len(os.Args) {
+			id, err := strconv.Atoi(os.Args[i+1])
+			if err != nil {
+				fmt.Printf("❌ 无效的设备 ID: %s\n", os.Args[i+1])
+				os.Exit(1)
+			}
+			deviceID = id
+			i++
+			break
+		}
+	}
+
+	// Parse global --token flag (Authentication token for V3 devices)
+	var deviceToken string
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--token" && i+1 < len(os.Args) {
+			deviceToken = os.Args[i+1]
+			i++
+			break
+		}
+	}
+
+	// Parse global --key flag (Authentication key for V3 devices)
+	var deviceKey string
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--key" && i+1 < len(os.Args) {
+			deviceKey = os.Args[i+1]
+			i++
+			break
+		}
+	}
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -98,23 +133,23 @@ func main() {
 	case "unbind":
 		handleUnbind(configPath)
 	case "status":
-		handleStatus(configPath, deviceTypeStr)
+		handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "on":
-		handlePower(configPath, true, deviceTypeStr)
+		handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "off":
-		handlePower(configPath, false, deviceTypeStr)
+		handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "temp":
-		handleTemp(configPath, deviceTypeStr)
+		handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "mode":
-		handleMode(configPath, deviceTypeStr)
+		handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "fan":
-		handleFan(configPath, deviceTypeStr)
+		handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "swing":
-		handleSwing(configPath, deviceTypeStr)
+		handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "set":
-		handleSet(configPath, deviceTypeStr)
+		handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "query":
-		handleQuery(configPath, deviceTypeStr)
+		handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "download":
 		handleDownload(configPath, region)
 	default:
@@ -569,6 +604,66 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 	}
 }
 
+// getDeviceDirect creates a device directly with host, id, token and key
+// This is used when --id, --token, --key are provided (similar to Python CLI)
+func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceTypeStr string) (*config.Device, interface{}) {
+	// Create a dummy config device for display purposes
+	device := &config.Device{
+		ID:      fmt.Sprintf("%d", deviceID),
+		Name:    "(Direct)",
+		IP:      host,
+		Port:    6444,
+		Version: 3, // V3 devices require token/key
+		Online:  true,
+	}
+
+	// Use device type from parameter or default to AC
+	effectiveType := deviceTypeStr
+	if effectiveType == "" {
+		effectiveType = DeviceTypeAC
+	}
+
+	// Create device based on type
+	switch effectiveType {
+	case DeviceTypeCC:
+		// Create Commercial Air Conditioner
+		ccDevice := cc.NewCommercialAirConditioner(host, deviceID, 6444)
+		fmt.Println("ℹ️  商业空调设备 (CC) 支持有限，部分命令可能不可用")
+		return device, ccDevice
+	default:
+		// Create Air Conditioner (default)
+		acDevice := ac.NewAirConditioner(
+			host,
+			6444,
+			deviceID,
+			msmart.WithName("(Direct)"),
+			msmart.WithVersion(3),
+		)
+
+		// Authenticate if token and key are provided
+		if tokenStr != "" && keyStr != "" {
+			token, err := hex.DecodeString(tokenStr)
+			if err != nil {
+				fmt.Printf("❌ 无效的Token: %v\n", err)
+				os.Exit(1)
+			}
+			key, err := hex.DecodeString(keyStr)
+			if err != nil {
+				fmt.Printf("❌ 无效的Key: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("🔐 正在认证...")
+			if err := acDevice.Authenticate(token, key); err != nil {
+				fmt.Printf("❌ 认证失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✅ 认证成功")
+		}
+
+		return device, acDevice
+	}
+}
+
 // getDeviceAuto automatically discovers a device and gets token/key for V3 devices
 func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, interface{}) {
 	fmt.Printf("🔍 正在自动发现设备: %s\n", identifier)
@@ -726,9 +821,10 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 	}
 }
 
-func handleStatus(configPath string, deviceTypeStr string) {
+func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities] [--energy]")
+		fmt.Println("   或者: midea status <host> --id <device-id> --token <token> --key <key>")
 		os.Exit(1)
 	}
 
@@ -752,7 +848,10 @@ func handleStatus(configPath string, deviceTypeStr string) {
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Direct mode: if deviceID is provided, use direct connection
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		// Auto mode: discover device and get token/key automatically
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
@@ -951,13 +1050,14 @@ func printEnergyUsage(acDevice *ac.AirConditioner) {
 	fmt.Println("╚════════════════════════════════════════╝")
 }
 
-func handlePower(configPath string, on bool, deviceTypeStr string) {
+func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 3 {
 		action := "on"
 		if !on {
 			action = "off"
 		}
 		fmt.Printf("❌ 用法: midea %s <name|id> [--auto]\n", action)
+		fmt.Println("   或者: midea %s <host> --id <device-id> --token <token> --key <key>")
 		os.Exit(1)
 	}
 
@@ -973,7 +1073,10 @@ func handlePower(configPath string, on bool, deviceTypeStr string) {
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Direct mode: if deviceID is provided, use direct connection
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
@@ -1005,9 +1108,10 @@ func handlePower(configPath string, on bool, deviceTypeStr string) {
 	fmt.Printf("✅ %s %s\n", device.Name, action)
 }
 
-func handleTemp(configPath string, deviceTypeStr string) {
+func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea temp <name|id> <温度> [--auto]")
+		fmt.Println("   或者: midea temp <host> <温度> --id <device-id> --token <token> --key <key>")
 		fmt.Println("   温度范围: 16-30°C")
 		os.Exit(1)
 	}
@@ -1025,7 +1129,10 @@ func handleTemp(configPath string, deviceTypeStr string) {
 	var device *config.Device
 	var deviceObj interface{}
 
-	if autoMode {
+	// Direct mode: if deviceID is provided, use direct connection
+	if deviceID > 0 {
+		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+	} else if autoMode {
 		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
@@ -1066,7 +1173,7 @@ func handleTemp(configPath string, deviceTypeStr string) {
 	fmt.Printf("✅ %s 温度已设置为 %.0f°C\n", device.Name, temp)
 }
 
-func handleMode(configPath string, deviceTypeStr string) {
+func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea mode <name|id> <模式> [--auto]")
 		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
@@ -1137,7 +1244,7 @@ func handleMode(configPath string, deviceTypeStr string) {
 	fmt.Printf("✅ %s 模式已设置为 %s\n", device.Name, modeNames[mode])
 }
 
-func handleFan(configPath string, deviceTypeStr string) {
+func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea fan <name|id> <风速> [--auto]")
 		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
@@ -1208,7 +1315,7 @@ func handleFan(configPath string, deviceTypeStr string) {
 	fmt.Printf("✅ %s 风速已设置为 %s\n", device.Name, speedNames[speed])
 }
 
-func handleSwing(configPath string, deviceTypeStr string) {
+func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea swing <name|id> <模式> [--auto]")
 		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
@@ -1278,7 +1385,7 @@ func handleSwing(configPath string, deviceTypeStr string) {
 }
 
 // handleSet handles the set command for multi-parameter control
-func handleSet(configPath string, deviceTypeStr string) {
+func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea set <name|id> [选项] [--auto]")
 		fmt.Println("   选项:")
@@ -1466,7 +1573,7 @@ func handleSet(configPath string, deviceTypeStr string) {
 }
 
 // handleQuery handles the query command for querying device properties
-func handleQuery(configPath string, deviceTypeStr string) {
+func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea query <name|id> [key] [--all] [--auto]")
 		fmt.Println("   key: 属性名称 (如: temp, mode, fan, swing, power)")
