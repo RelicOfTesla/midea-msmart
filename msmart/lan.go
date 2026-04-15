@@ -27,6 +27,16 @@ type Key []byte
 
 var logger = log.Default()
 
+// Verbose controls whether debug logs are output
+var Verbose = false
+
+// verboseLog prints a log message only if Verbose is true
+func verboseLog(format string, args ...interface{}) {
+	if Verbose {
+		logger.Printf(format, args...)
+	}
+}
+
 // ProtocolError represents a protocol error
 type ProtocolError struct {
 	Message string
@@ -141,12 +151,12 @@ func (p *_LanProtocol) ConnectionMade(conn net.Conn) {
 
 	p.transport = conn
 	p.peer = p.formatSocketName(conn.RemoteAddr())
-	logger.Printf("Connected to %s.", p.peer)
+	verboseLog("Connected to %s.", p.peer)
 }
 
 // DataReceived handles data received events
 func (p *_LanProtocol) DataReceived(data []byte) {
-	logger.Printf("Received data from %s: %x", p.peer, data)
+	verboseLog("Received data from %s: %x", p.peer, data)
 	p.queue <- data
 }
 
@@ -167,7 +177,7 @@ func (p *_LanProtocol) Disconnect() error {
 		return errors.New("transport is nil")
 	}
 
-	logger.Printf("Disconnecting from %s.", p.peer)
+	verboseLog("Disconnecting from %s.", p.peer)
 	return p.transport.Close()
 }
 
@@ -183,7 +193,7 @@ func (p *_LanProtocol) Write(data []byte) error {
 	// Check if connection is still valid without calling Alive() to avoid deadlock
 	// since we already hold the mutex
 
-	logger.Printf("Sending data to %s: %x", p.peer, data)
+	verboseLog("Sending data to %s: %x", p.peer, data)
 	_, err := p.transport.Write(data)
 	return err
 }
@@ -309,7 +319,7 @@ func (p *_LanProtocolV3) Authenticated() bool {
 
 // DataReceived handles data received events
 func (p *_LanProtocolV3) DataReceived(data []byte) {
-	logger.Printf("Received data from %s: %x", p.Peer(), data)
+	verboseLog("Received data from %s: %x", p.Peer(), data)
 
 	// Add incoming data to buffer
 	p.buffer = append(p.buffer, data...)
@@ -853,14 +863,14 @@ func (l *LAN) read(timeout time.Duration) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	logger.Printf("Received packet from %s: %x", l.protocol.Peer(), packet)
+	verboseLog("Received packet from %s: %x", l.protocol.Peer(), packet)
 
 	// Decode packet to frame
 	response, err := PacketDecode(packet)
 	if err != nil {
 		return nil, err
 	}
-	logger.Printf("Received response from %s: %x", l.protocol.Peer(), response)
+	verboseLog("Received response from %s: %x", l.protocol.Peer(), response)
 
 	return response, nil
 }
@@ -928,7 +938,7 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 	// Send the request and wait for a response
 	for retries > 0 {
 		// Send the request
-		logger.Printf("Sending packet to %s: %x", l.protocol.Peer(), packet)
+		verboseLog("Sending packet to %s: %x", l.protocol.Peer(), packet)
 
 		if l.protocolV3 != nil {
 			err = l.protocolV3.WriteWithType(packet, PacketTypeEncryptedRequest)

@@ -27,6 +27,10 @@ type Device struct {
 	supported bool
 	online    bool
 
+	// Pre-set token and key for V3 devices (to skip cloud authentication)
+	presetToken []byte
+	presetKey   []byte
+
 	// Supported capability overrides map
 	// In Python: dict[str, tuple[str, type]]
 	// In Go: map[string]CapabilityOverrideInfo
@@ -85,11 +89,19 @@ func WithVersion(version int) DeviceOption {
 	}
 }
 
+// WithTokenKey sets the pre-set token and key for V3 devices
+func WithTokenKey(token, key []byte) DeviceOption {
+	return func(d *Device) {
+		d.presetToken = token
+		d.presetKey = key
+	}
+}
+
 // SendCommand sends a command to the device and returns any responses
 // This is the equivalent of Python's _send_command method
 func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 	data := command.ToBytes(nil)
-	deviceLogger.Printf("DEBUG: Sending command to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
+	verboseLog("Sending command to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
 
 	start := time.Now()
 	responses, err := d.lan.Send(data, Retries)
@@ -105,7 +117,7 @@ func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 	if len(responses) == 0 {
 		deviceLogger.Printf("WARNING: No response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
 	} else {
-		deviceLogger.Printf("DEBUG: Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
+		verboseLog("Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
 	}
 
 	return responses, nil
@@ -114,7 +126,7 @@ func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 // SendBytes sends raw bytes to the device and returns any responses
 // This is used by sub-packages that have their own command serialization
 func (d *Device) SendBytes(data []byte) ([][]byte, error) {
-	deviceLogger.Printf("DEBUG: Sending bytes to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
+	verboseLog("Sending bytes to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
 
 	start := time.Now()
 	responses, err := d.lan.Send(data, Retries)
@@ -130,7 +142,7 @@ func (d *Device) SendBytes(data []byte) ([][]byte, error) {
 	if len(responses) == 0 {
 		deviceLogger.Printf("WARNING: No response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
 	} else {
-		deviceLogger.Printf("DEBUG: Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
+		verboseLog("Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
 	}
 
 	return responses, nil

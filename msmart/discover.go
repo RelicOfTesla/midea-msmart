@@ -102,7 +102,7 @@ func getBroadcastAddresses() []string {
 			}
 			
 			broadcastStr := broadcast.String()
-			logger.Printf("Found broadcast address %s for interface %s (%s)", broadcastStr, iface.Name, ip)
+			verboseLog("Found broadcast address %s for interface %s (%s)", broadcastStr, iface.Name, ip)
 			addresses = append(addresses, broadcastStr)
 		}
 	}
@@ -145,6 +145,10 @@ type DiscoverConfig struct {
 	Password string
 	// AutoConnect indicates whether to automatically connect and authenticate devices
 	AutoConnect bool
+	// ExistingToken is pre-existing token for V3 devices (to skip cloud auth)
+	ExistingToken []byte
+	// ExistingKey is pre-existing key for V3 devices (to skip cloud auth)
+	ExistingKey []byte
 }
 
 // DiscoverResult represents a discovered device result
@@ -193,7 +197,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 				if setsockoptErr != nil {
 					logger.Printf("Warning: failed to set SO_BROADCAST option: %v", setsockoptErr)
 				} else {
-					logger.Printf("SO_BROADCAST option set successfully")
+					verboseLog("SO_BROADCAST option set successfully")
 				}
 			}
 		} else {
@@ -223,23 +227,31 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	}()
 
 	// Send discovery messages
-	// Get broadcast addresses for all network interfaces
-	broadcastAddresses := getBroadcastAddresses()
-	logger.Printf("Sending discovery to %d broadcast addresses: %v", len(broadcastAddresses), broadcastAddresses)
+	// Check if target is a broadcast address or a specific IP
+	var targetAddresses []string
+	if config.Target == IPv4Broadcast {
+		// Get broadcast addresses for all network interfaces
+		targetAddresses = getBroadcastAddresses()
+		verboseLog("Sending discovery to %d broadcast addresses: %v", len(targetAddresses), targetAddresses)
+	} else {
+		// Use the specific target address
+		targetAddresses = []string{config.Target}
+		verboseLog("Sending discovery to specific target: %s", config.Target)
+	}
 	
 	for _, port := range DiscoveryPorts {
-		for _, broadcastAddr := range broadcastAddresses {
-			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", broadcastAddr, port))
+		for _, targetAddr := range targetAddresses {
+			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", targetAddr, port))
 			if err != nil {
-				logger.Printf("Failed to resolve address %s:%d: %v", broadcastAddr, port, err)
+				logger.Printf("Failed to resolve address %s:%d: %v", targetAddr, port, err)
 				continue
 			}
 
-			logger.Printf("Discovery sent to %s:%d.", broadcastAddr, port)
+			verboseLog("Discovery sent to %s:%d.", targetAddr, port)
 
 			for i := 0; i < config.DiscoveryPackets; i++ {
 				if _, err := conn.WriteTo(DiscoveryMsg, addr); err != nil {
-					logger.Printf("Failed to send discovery to %s:%d: %v", broadcastAddr, port, err)
+					logger.Printf("Failed to send discovery to %s:%d: %v", targetAddr, port, err)
 				}
 			}
 		}
@@ -248,14 +260,14 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	// Wait for timeout
 	select {
 	case <-time.After(config.Timeout):
-		logger.Printf("Discovery timeout after %s", config.Timeout)
+		verboseLog("Discovery timeout after %s", config.Timeout)
 		// Cancel the context to stop the response handler
 		cancel()
 	case <-ctx.Done():
-		logger.Printf("Discovery cancelled")
+		verboseLog("Discovery cancelled")
 	}
 
-	logger.Printf("Closing connection and waiting for response handler...")
+	verboseLog("Closing connection and waiting for response handler...")
 
 	// Close the connection to stop the receive goroutine
 	conn.Close()
@@ -263,7 +275,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	// Wait for the response handler to finish
 	wg.Wait()
 
-	logger.Printf("Response handler finished, collecting results...")
+	verboseLog("Response handler finished, collecting results...")
 
 	// Close the results channel
 	close(results)
@@ -280,7 +292,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 		}
 	}
 
-	logger.Printf("Discovered %d devices.", len(devices))
+	verboseLog("Discovered %d devices.", len(devices))
 
 	// Return first error if any
 	if len(errs) > 0 {
@@ -341,7 +353,7 @@ func handleDiscoveryResponses(ctx context.Context, conn net.PacketConn, discover
 		discoveredIPs[ip] = true
 		discoveredIPsMu.Unlock()
 
-		logger.Printf("Discovery response from %s: %s", ip, hex.EncodeToString(buf[:n]))
+		verboseLog("Discovery response from %s: %s", ip, hex.EncodeToString(buf[:n]))
 
 		// Process the response in a goroutine
 		go func(ip string, data []byte) {
@@ -359,7 +371,7 @@ func processDiscoveryResponse(ip string, data []byte, config *DiscoverConfig) (*
 		return nil, err
 	}
 
-	logger.Printf("Device version for %s: %d", ip, version)
+	verboseLog("Device version for %s: %d", ip, version)
 
 	// Get device info
 	info, err := getDeviceInfo(ip, version, data)
@@ -367,17 +379,26 @@ func processDiscoveryResponse(ip string, data []byte, config *DiscoverConfig) (*
 		return nil, err
 	}
 
-	logger.Printf("Device info for %s: %+v", ip, info)
+	verboseLog("Device info for %s: %+v", ip, info)
 
-	// Construct device
+	// Construct device with optional pre-set token/key for V3 devices
+	opts := []DeviceOption{
+		WithSN(info.SN),
+		WithName(info.Name),
+		WithVersion(info.Version),
+	}
+
+	// If existing token/key are provided (for V3 devices to skip cloud auth)
+	if config.ExistingToken != nil && config.ExistingKey != nil {
+		opts = append(opts, WithTokenKey(config.ExistingToken, config.ExistingKey))
+	}
+
 	device := NewDevice(
 		info.IP,
 		info.Port,
 		info.DeviceID,
 		info.DeviceType,
-		WithSN(info.SN),
-		WithName(info.Name),
-		WithVersion(info.Version),
+		opts...,
 	)
 
 	// Auto-connect if requested
@@ -497,7 +518,7 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 		return nil, NewDiscoverError("failed to decrypt discovery response", err)
 	}
 
-	logger.Printf("Decrypted data from %s: %s", ip, hex.EncodeToString(decryptedData))
+	verboseLog("Decrypted data from %s: %s", ip, hex.EncodeToString(decryptedData))
 
 	// Check minimum decrypted length
 	if len(decryptedData) < 42 {
@@ -613,6 +634,22 @@ func ConnectDevice(device *Device, config *DiscoverConfig) error {
 
 // authenticateDevice attempts to authenticate a V3 device
 func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
+	// First, try to use pre-set token/key if available (skip cloud authentication)
+	if device.presetToken != nil && device.presetKey != nil {
+		verboseLog("Using pre-set token/key for V3 device authentication (skipping cloud)")
+		if err := device.Authenticate(device.presetToken, device.presetKey); err != nil {
+			verboseLog("Pre-set token/key authentication failed: %v", err)
+			// Fall through to cloud authentication
+		} else {
+			return true, nil
+		}
+	}
+
+	// Check if cloud credentials are available
+	if config.Account == "" || config.Password == "" {
+		return false, NewDiscoverError("V3 device requires cloud credentials (account/password) or pre-set token/key. Use 'discover --auto-connect --account <email> --password <pass>' to get token/key first.", nil)
+	}
+
 	// Get cloud connection
 	cloud, err := getCloud(config)
 	if err != nil {
@@ -635,7 +672,7 @@ func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
 		}
 
 		udpidHex := hex.EncodeToString(udpid)
-		logger.Printf("Fetching token and key for udpid '%s' (%s).", udpidHex, endian)
+		verboseLog("Fetching token and key for udpid '%s' (%s).", udpidHex, endian)
 
 		// Get token and key from cloud
 		token, key, err := cloud.GetToken(udpidHex)

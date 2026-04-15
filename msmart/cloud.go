@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -174,6 +175,11 @@ func (bc *BaseCloud) postRequest(urlStr string, headers map[string]string, rawDa
 
 		if err != nil {
 			return nil, err
+		}
+
+		// Set Content-Type for form data
+		if formData != nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
 		// Set headers
@@ -478,8 +484,13 @@ func NewSmartHomeCloud(region string, account *string, password *string, useChin
 		"US": {"midea@mailinator.com", "this_is_a_password1"},
 	}
 
+	// Validate credentials: both must be provided, or neither (use defaults)
+	if (account == nil) != (password == nil) {
+		return nil, errors.New("account and password must be specified together")
+	}
+
 	// Use default credentials if no account/password provided
-	if account == nil || password == nil {
+	if account == nil && password == nil {
 		creds, ok := cloudCredentials[region]
 		if !ok {
 			return nil, fmt.Errorf("unknown cloud region '%s'", region)
@@ -815,29 +826,47 @@ func NewNetHomePlusCloudSecurity() *NetHomePlusCloudSecurity {
 // Sign generates a signature for the provided data and URL.
 func (s *NetHomePlusCloudSecurity) Sign(urlStr string, data map[string]interface{}) string {
 	// Get path portion of request
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		return ""
+	// If urlStr is already a path (starts with '/'), use it directly
+	var path string
+	if strings.HasPrefix(urlStr, "/") {
+		path = urlStr
+	} else {
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			path = urlStr // Fallback to using urlStr directly
+		} else {
+			path = parsedURL.Path
+		}
 	}
-	path := parsedURL.Path
 
-	// Sort request and create a query string
+	// Sort request and create a query string (matching Python's behavior)
+	// Python: query = unquote_plus(urlencode(sorted(data.items())))
 	var keys []string
 	for k := range data {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
+	// Build query string
+	// First URL encode, then decode (matching Python's unquote_plus behavior)
 	var pairs []string
 	for _, k := range keys {
-		pairs = append(pairs, fmt.Sprintf("%s=%v", k, data[k]))
+		// Convert value to string and URL encode it
+		v := url.QueryEscape(fmt.Sprintf("%v", data[k]))
+		// Decode it back (unquote_plus in Python decodes '+' to space and %XX to chars)
+		vDecoded, err := url.QueryUnescape(v)
+		if err == nil {
+			v = vDecoded
+		}
+		pairs = append(pairs, fmt.Sprintf("%s=%s", k, v))
 	}
 	query := strings.Join(pairs, "&")
 
 	msg := path + query + s.APP_KEY
 
 	hash := sha256.Sum256([]byte(msg))
-	return hex.EncodeToString(hash[:])
+	sign := hex.EncodeToString(hash[:])
+	return sign
 }
 
 // EncryptPassword encrypts the login password.
@@ -863,8 +892,13 @@ func NewNetHomePlusCloud(region string, account *string, password *string, getAs
 		"US": {"nethome+us@mailinator.com", "password1"},
 	}
 
+	// Validate credentials: both must be provided, or neither (use defaults)
+	if (account == nil) != (password == nil) {
+		return nil, errors.New("account and password must be specified together")
+	}
+
 	// Use default credentials if no account/password provided
-	if account == nil || password == nil {
+	if account == nil && password == nil {
 		creds, ok := cloudCredentials[region]
 		if !ok {
 			return nil, fmt.Errorf("unknown cloud region '%s'", region)
@@ -914,6 +948,16 @@ func (nhpc *NetHomePlusCloud) parseResponse(response *http.Response) (interface{
 
 	responseCode, ok := result["errorCode"].(float64)
 	if !ok {
+		// Try parsing as string
+		if codeStr, ok := result["errorCode"].(string); ok {
+			if code, err := strconv.Atoi(codeStr); err == nil {
+				if code == 0 {
+					return result["result"], nil
+				}
+				msg, _ := result["msg"].(string)
+				return nil, NewApiError(msg, code)
+			}
+		}
 		return nil, NewApiError("invalid error code", result["errorCode"])
 	}
 
@@ -928,7 +972,7 @@ func (nhpc *NetHomePlusCloud) parseResponse(response *http.Response) (interface{
 // apiRequest makes a request to the cloud and return the results.
 func (nhpc *NetHomePlusCloud) apiRequest(endpoint string, body map[string]interface{}) (map[string]interface{}, error) {
 	// Sign the contents and add it to the body
-	body["sign"] = nhpc.security.Sign(nhpc.baseURL+endpoint, body)
+	body["sign"] = nhpc.security.Sign(endpoint, body)
 
 	// Build complete request URL
 	urlStr := fmt.Sprintf("%s%s", nhpc.baseURL, endpoint)
@@ -1001,6 +1045,45 @@ func (nhpc *NetHomePlusCloud) Login(force bool) error {
 // GetSessionID returns the session ID.
 func (nhpc *NetHomePlusCloud) GetSessionID() string {
 	return nhpc.sessionID
+}
+
+// GetToken gets token and key for the provided udpid.
+// This method overrides BaseCloud.GetToken to include sessionId in the request.
+func (nhpc *NetHomePlusCloud) GetToken(udpid string) (string, string, error) {
+	response, err := nhpc.apiRequest(
+		"/v1/iot/secure/getToken",
+		nhpc.buildRequestBody(map[string]interface{}{
+			"udpid": udpid,
+		}),
+	)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Assert response is not None since we should throw on errors
+	if response == nil {
+		return "", "", CloudError
+	}
+
+	tokenList, ok := response["tokenlist"].([]interface{})
+	if !ok {
+		return "", "", CloudError
+	}
+
+	for _, t := range tokenList {
+		token, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if token["udpId"] == udpid {
+			tokenStr, _ := token["token"].(string)
+			keyStr, _ := token["key"].(string)
+			return tokenStr, keyStr, nil
+		}
+	}
+
+	// No matching udpId in the tokenlist
+	return "", "", fmt.Errorf("no token/key found for udpid %s", udpid)
 }
 
 // GetProtocolLua fetches and decodes the protocol Lua file.

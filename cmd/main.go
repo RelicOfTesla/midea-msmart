@@ -19,6 +19,27 @@ import (
 var version = "1.0.0"
 
 func main() {
+	// Check for global verbose flag
+	verbose := false
+	for _, arg := range os.Args {
+		if arg == "-v" || arg == "--verbose" {
+			verbose = true
+			msmart.Verbose = true
+			break
+		}
+	}
+	_ = verbose // Avoid unused variable warning
+
+	// Parse global --region flag
+	region := msmart.DefaultCloudRegion
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--region" && i+1 < len(os.Args) {
+			region = os.Args[i+1]
+			i++
+			break
+		}
+	}
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -32,7 +53,7 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 		return
-	case "version", "-v", "--version":
+	case "version", "--version":
 		fmt.Printf("midea %s\n", version)
 		return
 	}
@@ -75,11 +96,16 @@ func printUsage() {
 midea - 美的空调控制 CLI v` + version + `
 
 用法:
-  midea <command> [arguments]
+  midea [-v|--verbose] <command> [arguments]
+
+全局选项:
+  -v, --verbose    显示详细调试日志
 
 命令:
-  discover [--auto-connect|-a]   发现设备并保存到配置
+  discover [--auto-connect|-a] [--account <账号> --password <密码>]
+                                发现设备并保存到配置
                                 --auto-connect: 自动连接并获取V3设备的token
+                                --account/--password: 美的账号密码 (V3设备认证需要)
   list                          列出已保存的设备
   bind <id|sn|ip> -n <名称>   绑定设备别名
   unbind <name|id>            解绑设备
@@ -108,7 +134,9 @@ set命令选项:
 
 示例:
   midea discover                      # 发现局域网内的设备
-  midea discover --auto-connect      # 发现设备并自动获取V3设备token
+  midea -v discover --auto-connect   # 使用verbose模式发现设备并自动获取V3设备token
+  midea discover --auto-connect --account your@email.com --password yourpass
+                                      # 使用自定义账号发现设备
   midea list                          # 列出已保存的设备
   midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备，命名为"客厅"
   midea status 客厅                   # 查询"客厅"空调状态
@@ -142,21 +170,40 @@ func handleDiscover(configPath string) {
 		os.Exit(1)
 	}
 
-	// Check for --auto-connect flag
+	// Parse flags
 	autoConnect := false
-	for _, arg := range os.Args[2:] {
-		if arg == "--auto-connect" || arg == "-a" {
+	var account, password string
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--auto-connect", "-a":
 			autoConnect = true
-			break
+		case "--account":
+			if i+1 < len(os.Args) {
+				account = os.Args[i+1]
+				i++
+			}
+		case "--password":
+			if i+1 < len(os.Args) {
+				password = os.Args[i+1]
+				i++
+			}
 		}
 	}
 
 	// Discover devices
-	devices, err := msmart.Discover(ctx, &msmart.DiscoverConfig{
+	discoverConfig := &msmart.DiscoverConfig{
 		Timeout:          5 * time.Second,
 		DiscoveryPackets: 3,
 		AutoConnect:      autoConnect,
-	})
+	}
+	
+	// Set account and password if provided
+	if account != "" && password != "" {
+		discoverConfig.Account = account
+		discoverConfig.Password = password
+	}
+
+	devices, err := msmart.Discover(ctx, discoverConfig)
 
 	// Even if there's an error, check if we discovered any devices
 	if err != nil && len(devices) == 0 {
@@ -390,7 +437,7 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 	device := cfg.GetDevice(identifier)
 	if device == nil {
 		fmt.Printf("❌ 未找到设备: %s\n", identifier)
-		fmt.Println("💡 使用 'midea list' 查看设备列表")
+		fmt.Println("💡 使用 'midea list' 查看设备列表 或使用 --auto 自动发现设备")
 		os.Exit(1)
 	}
 
@@ -416,7 +463,7 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 	if device.Version == 3 {
 		if device.Token == "" || device.Key == "" {
 			fmt.Println("❌ V3设备需要token和key进行认证")
-			fmt.Println("💡 请使用 'midea discover --auto-connect' 获取token")
+			fmt.Println("💡 请使用 'midea status <ip> --auto' 自动获取token")
 			os.Exit(1)
 		}
 
@@ -441,13 +488,170 @@ func getDevice(configPath, identifier string) (*config.Device, *ac.AirConditione
 	return device, acDevice
 }
 
-func handleStatus(configPath string) {
-	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea status <name|id>")
+// getDeviceAuto automatically discovers a device and gets token/key for V3 devices
+func getDeviceAuto(identifier string, configPath string) (*config.Device, *ac.AirConditioner) {
+	fmt.Printf("🔍 正在自动发现设备: %s\n", identifier)
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Discover the device
+	discoverConfig := &msmart.DiscoverConfig{
+		Target:          identifier,
+		Timeout:         5 * time.Second,
+		DiscoveryPackets: 3,
+		AutoConnect:      true, // Enable auto-connect to get token/key
+	}
+
+	devices, err := msmart.Discover(ctx, discoverConfig)
+	if err != nil {
+		fmt.Printf("❌ 发现设备失败: %v\n", err)
 		os.Exit(1)
 	}
 
-	device, acDevice := getDevice(configPath, os.Args[2])
+	if len(devices) == 0 {
+		fmt.Println("❌ 未找到设备")
+		os.Exit(1)
+	}
+
+	// Get the first discovered device
+	d := devices[0]
+
+	// Get device info
+	deviceID := d.GetID()
+	deviceType := "未知设备"
+	if d.GetType() == msmart.DeviceTypeAirConditioner {
+		deviceType = "空调"
+	}
+
+	// Get name
+	name := ""
+	if n := d.GetName(); n != nil {
+		name = *n
+	}
+
+	// Get SN
+	sn := ""
+	if s := d.GetSN(); s != nil {
+		sn = *s
+	}
+
+	// Get version
+	version := 2
+	if v := d.GetVersion(); v != nil {
+		version = *v
+	}
+
+	// Get token/key
+	var token, key string
+	if t := d.GetToken(); t != nil {
+		token = *t
+	}
+	if k := d.GetKey(); k != nil {
+		key = *k
+	}
+
+	fmt.Printf("✅ 发现设备: %s (%s) [ID: %d, 版本: V%d]\n", deviceType, d.GetIP(), deviceID, version)
+
+	// Check if it's a V3 device
+	if version == 3 && (token == "" || key == "") {
+		fmt.Println("❌ V3设备需要token和key进行认证，但自动获取失败")
+		fmt.Println("💡 请尝试使用 'midea discover --auto-connect' 命令")
+		os.Exit(1)
+	}
+
+	// Load config and save device
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Printf("❌ 加载配置失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create config device
+	device := &config.Device{
+		ID:      fmt.Sprintf("%d", deviceID),
+		Name:    name,
+		IP:      d.GetIP(),
+		Port:    d.GetPort(),
+		SN:      sn,
+		Type:    int(d.GetType()),
+		Token:   token,
+		Key:     key,
+		Version: version,
+		Online:  d.GetOnline(),
+	}
+
+	// Check if device already exists
+	existingDevice := cfg.GetDevice(fmt.Sprintf("%d", deviceID))
+	if existingDevice != nil {
+		// Keep the existing name
+		device.Name = existingDevice.Name
+	}
+
+	// Save to config
+	cfg.AddDevice(*device)
+	if err := cfg.Save(configPath); err != nil {
+		fmt.Printf("⚠️  保存配置失败: %v\n", err)
+	}
+
+	// Create AC device
+	acDevice := ac.NewAirConditioner(
+		d.GetIP(),
+		d.GetPort(),
+		int(deviceID),
+		msmart.WithName(name),
+		msmart.WithVersion(version),
+	)
+
+	// Authenticate if V3
+	if version == 3 && token != "" && key != "" {
+		tokenBytes, err := hex.DecodeString(token)
+		if err != nil {
+			fmt.Printf("❌ 无效的Token: %v\n", err)
+			os.Exit(1)
+		}
+		keyBytes, err := hex.DecodeString(key)
+		if err != nil {
+			fmt.Printf("❌ 无效的Key: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("🔐 正在认证...")
+		if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
+			fmt.Printf("❌ 认证失败: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✅ 认证成功")
+	}
+
+	return device, acDevice
+}
+
+func handleStatus(configPath string) {
+	if len(os.Args) < 3 {
+		fmt.Println("❌ 用法: midea status <name|id> [--auto]")
+		os.Exit(1)
+	}
+
+	// Parse --auto flag
+	autoMode := false
+	identifier := os.Args[2]
+	for i := 3; i < len(os.Args); i++ {
+		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
+			autoMode = true
+		}
+	}
+
+	var device *config.Device
+	var acDevice *ac.AirConditioner
+
+	if autoMode {
+		// Auto mode: discover device and get token/key automatically
+		device, acDevice = getDeviceAuto(identifier, configPath)
+	} else {
+		// Normal mode: load from config
+		device, acDevice = getDevice(configPath, identifier)
+	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
