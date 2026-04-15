@@ -645,10 +645,8 @@ func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
 		}
 	}
 
-	// Check if cloud credentials are available
-	if config.Account == "" || config.Password == "" {
-		return false, NewDiscoverError("V3 device requires cloud credentials (account/password) or pre-set token/key. Use 'discover --auto-connect --account <email> --password <pass>' to get token/key first.", nil)
-	}
+	// Note: Cloud credentials can be provided explicitly or will use defaults in getCloud()
+	// So we don't check for empty Account/Password here
 
 	// Get cloud connection
 	cloud, err := getCloud(config)
