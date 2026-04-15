@@ -33,6 +33,13 @@ var deviceTypeMap = map[string]msmart.DeviceType{
 }
 
 func main() {
+	if err := run(); err != nil {
+		// Error already printed by the handler
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	// Check for global verbose flag
 	verbose := false
 	for _, arg := range os.Args {
@@ -63,7 +70,7 @@ func main() {
 			if _, ok := deviceTypeMap[deviceTypeStr]; !ok {
 				fmt.Printf("❌ 不支持的设备类型: %s\n", os.Args[i+1])
 				fmt.Println("   支持的设备类型: AC (空调), CC (商业空调)")
-				os.Exit(1)
+				return fmt.Errorf("unsupported device type: %s", os.Args[i+1])
 			}
 			i++
 			break
@@ -77,7 +84,7 @@ func main() {
 			id, err := strconv.Atoi(os.Args[i+1])
 			if err != nil {
 				fmt.Printf("❌ 无效的设备 ID: %s\n", os.Args[i+1])
-				os.Exit(1)
+				return fmt.Errorf("invalid device ID: %s", os.Args[i+1])
 			}
 			deviceID = id
 			i++
@@ -107,7 +114,7 @@ func main() {
 
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		return fmt.Errorf("no command provided")
 	}
 
 	command := os.Args[1]
@@ -117,46 +124,46 @@ func main() {
 	switch command {
 	case "help", "-h", "--help":
 		printUsage()
-		return
+		return nil
 	case "version", "--version":
 		fmt.Printf("midea %s\n", version)
-		return
+		return nil
 	}
 
 	// Execute command
 	switch command {
 	case "discover":
-		handleDiscover(configPath, region)
+		return handleDiscover(configPath, region)
 	case "list":
-		handleList(configPath)
+		return handleList(configPath)
 	case "bind":
-		handleBind(configPath)
+		return handleBind(configPath)
 	case "unbind":
-		handleUnbind(configPath)
+		return handleUnbind(configPath)
 	case "status":
-		handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "on":
-		handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "off":
-		handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "temp":
-		handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "mode":
-		handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "fan":
-		handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "swing":
-		handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "set":
-		handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "query":
-		handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
 	case "download":
-		handleDownload(configPath, region)
+		return handleDownload(configPath, region)
 	default:
 		fmt.Printf("❌ 未知命令: %s\n", command)
 		printUsage()
-		os.Exit(1)
+		return fmt.Errorf("unknown command: %s", command)
 	}
 }
 
@@ -251,7 +258,7 @@ set命令选项:
 // Discovery Commands
 // ============================================================================
 
-func handleDiscover(configPath string, region string) {
+func handleDiscover(configPath string, region string) error {
 	fmt.Println("🔍 正在发现设备...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -260,7 +267,7 @@ func handleDiscover(configPath string, region string) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Parse host argument and flags
@@ -287,7 +294,7 @@ func handleDiscover(configPath string, region string) {
 				count, err := strconv.Atoi(os.Args[i+1])
 				if err != nil || count < 1 {
 					fmt.Printf("❌ 无效的 count 值: %s (应为正整数)\n", os.Args[i+1])
-					os.Exit(1)
+					return fmt.Errorf("invalid count value: %s", os.Args[i+1])
 				}
 				discoveryCount = count
 				i++
@@ -325,7 +332,7 @@ func handleDiscover(configPath string, region string) {
 	// Even if there's an error, check if we discovered any devices
 	if err != nil && len(devices) == 0 {
 		fmt.Printf("❌ 发现设备失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Log warning if there was an error but we have devices
@@ -335,7 +342,7 @@ func handleDiscover(configPath string, region string) {
 
 	if len(devices) == 0 {
 		fmt.Println("⚠️  未发现任何设备")
-		return
+		return nil
 	}
 
 	fmt.Printf("\n✅ 发现 %d 台设备\n\n", len(devices))
@@ -414,25 +421,26 @@ func handleDiscover(configPath string, region string) {
 	// Save config
 	if err := cfg.Save(configPath); err != nil {
 		fmt.Printf("\n❌ 保存配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Printf("\n💾 配置已保存到: %s\n", configPath)
 	fmt.Println("\n💡 使用 'midea bind <id|ip> -n <名称>' 来为设备命名")
+	return nil
 }
 
-func handleList(configPath string) {
+func handleList(configPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	devices := cfg.ListDevices()
 	if len(devices) == 0 {
 		fmt.Println("📋 暂无设备配置")
 		fmt.Println("💡 使用 'midea discover' 来发现设备")
-		return
+		return nil
 	}
 
 	fmt.Println("\n📋 设备列表:")
@@ -459,16 +467,17 @@ func handleList(configPath string) {
 
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("配置文件: %s\n", configPath)
+	return nil
 }
 
 // ============================================================================
 // Device Management Commands
 // ============================================================================
 
-func handleBind(configPath string) {
+func handleBind(configPath string) error {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea bind <id|sn|ip> -n <名称>")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for bind command")
 	}
 
 	identifier := os.Args[2]
@@ -484,33 +493,34 @@ func handleBind(configPath string) {
 
 	if name == "" {
 		fmt.Println("❌ 请指定名称: midea bind <id|sn|ip> -n <名称>")
-		os.Exit(1)
+		return fmt.Errorf("name not specified for bind command")
 	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	if !cfg.BindName(identifier, name) {
 		fmt.Printf("❌ 未找到设备: %s\n", identifier)
 		fmt.Println("💡 使用 'midea list' 查看设备列表")
-		os.Exit(1)
+		return fmt.Errorf("device not found: %s", identifier)
 	}
 
 	if err := cfg.Save(configPath); err != nil {
 		fmt.Printf("❌ 保存配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Printf("✅ 已绑定: %s -> %s\n", identifier, name)
+	return nil
 }
 
-func handleUnbind(configPath string) {
+func handleUnbind(configPath string) error {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea unbind <name|id>")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for unbind command")
 	}
 
 	identifier := os.Args[2]
@@ -518,21 +528,22 @@ func handleUnbind(configPath string) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	if !cfg.RemoveDevice(identifier) {
 		fmt.Printf("❌ 未找到设备: %s\n", identifier)
 		fmt.Println("💡 使用 'midea list' 查看设备列表")
-		os.Exit(1)
+		return fmt.Errorf("device not found: %s", identifier)
 	}
 
 	if err := cfg.Save(configPath); err != nil {
 		fmt.Printf("❌ 保存配置失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Printf("✅ 已解绑: %s\n", identifier)
+	return nil
 }
 
 // ============================================================================
@@ -547,29 +558,24 @@ type Device interface {
 	GetPort() int
 }
 
-// mustGetACDevice extracts an AC device from interface{}, exits if not AC type
-func mustGetACDevice(device interface{}) *ac.AirConditioner {
+// mustGetACDevice extracts an AC device from interface{}, returns error if not AC type
+func mustGetACDevice(device interface{}) (*ac.AirConditioner, error) {
 	acDevice, ok := device.(*ac.AirConditioner)
 	if !ok {
-		fmt.Println("❌ 此命令只支持空调设备 (AC)")
-		fmt.Println("💡 使用 --device_type AC 指定空调设备")
-		os.Exit(1)
+		return nil, fmt.Errorf("此命令只支持空调设备 (AC)，请使用 --device_type AC 指定空调设备")
 	}
-	return acDevice
+	return acDevice, nil
 }
 
-func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Device, interface{}) {
+func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Device, interface{}, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Printf("❌ 加载配置失败: %v\n", err)
-		os.Exit(1)
+		return nil, nil, err
 	}
 
 	device := cfg.GetDevice(identifier)
 	if device == nil {
-		fmt.Printf("❌ 未找到设备: %s\n", identifier)
-		fmt.Println("💡 使用 'midea list' 查看设备列表 或使用 --auto 自动发现设备")
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("未找到设备: %s (使用 'midea list' 查看设备列表 或使用 --auto 自动发现设备)", identifier)
 	}
 
 	// Use device type from parameter, or from config, or default to AC
@@ -585,8 +591,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 	// Parse device ID
 	deviceID, err := strconv.ParseInt(device.ID, 10, 64)
 	if err != nil {
-		fmt.Printf("❌ 无效的设备ID: %s\n", device.ID)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("无效的设备ID: %s", device.ID)
 	}
 
 	// Create device based on type
@@ -595,7 +600,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(device.IP, int(deviceID), device.Port)
 		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
-		return device, ccDevice
+		return device, ccDevice, nil
 	default:
 		// Create Air Conditioner (default)
 		acDevice := ac.NewAirConditioner(
@@ -609,35 +614,30 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 		// Set token and key if available (only for V3 devices)
 		if device.Version == 3 {
 			if device.Token == "" || device.Key == "" {
-				fmt.Printf("❌ V3设备需要token和key进行认证\n")
-				fmt.Println("💡 使用 '--auto' 参数自动获取token/key,或使用 'midea discover --auto-connect' 重新发现设备")
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("V3设备需要token和key进行认证 (使用 '--auto' 参数自动获取token/key,或使用 'midea discover --auto-connect' 重新发现设备)")
 			}
 
 			token, err := hex.DecodeString(device.Token)
 			if err != nil {
-				fmt.Printf("❌ 无效的Token: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("无效的Token: %w", err)
 			}
 			key, err := hex.DecodeString(device.Key)
 			if err != nil {
-				fmt.Printf("❌ 无效的Key: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
 			fmt.Println("🔐 正在认证...")
 			if err := acDevice.Authenticate(token, key); err != nil {
-				fmt.Printf("❌ 认证失败: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("认证失败: %w", err)
 			}
 			fmt.Println("✅ 认证成功")
 		}
-		return device, acDevice
+		return device, acDevice, nil
 	}
 }
 
 // getDeviceDirect creates a device directly with host, id, token and key
 // This is used when --id, --token, --key are provided (similar to Python CLI)
-func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceTypeStr string) (*config.Device, interface{}) {
+func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceTypeStr string) (*config.Device, interface{}, error) {
 	// Create a dummy config device for display purposes
 	device := &config.Device{
 		ID:      fmt.Sprintf("%d", deviceID),
@@ -660,7 +660,7 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(host, deviceID, 6444)
 		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
-		return device, ccDevice
+		return device, ccDevice, nil
 	default:
 		// Create Air Conditioner (default)
 		acDevice := ac.NewAirConditioner(
@@ -675,28 +675,25 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 		if tokenStr != "" && keyStr != "" {
 			token, err := hex.DecodeString(tokenStr)
 			if err != nil {
-				fmt.Printf("❌ 无效的Token: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("无效的Token: %w", err)
 			}
 			key, err := hex.DecodeString(keyStr)
 			if err != nil {
-				fmt.Printf("❌ 无效的Key: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
 			fmt.Println("🔐 正在认证...")
 			if err := acDevice.Authenticate(token, key); err != nil {
-				fmt.Printf("❌ 认证失败: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("认证失败: %w", err)
 			}
 			fmt.Println("✅ 认证成功")
 		}
 
-		return device, acDevice
+		return device, acDevice, nil
 	}
 }
 
 // getDeviceAuto automatically discovers a device and gets token/key for V3 devices
-func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, interface{}) {
+func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, interface{}, error) {
 	fmt.Printf("🔍 正在自动发现设备: %s\n", identifier)
 
 	// Create context with timeout
@@ -714,13 +711,11 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 
 	devices, err := msmart.Discover(ctx, discoverConfig)
 	if err != nil {
-		fmt.Printf("❌ 发现设备失败: %v\n", err)
-		os.Exit(1)
+		return nil, nil, err
 	}
 
 	if len(devices) == 0 {
-		fmt.Println("❌ 未找到设备")
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("未找到设备")
 	}
 
 	// Get the first discovered device
@@ -766,14 +761,13 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 
 	// Check if it's a V3 device
 	if version == 3 && (token == "" || key == "") {
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("V3设备未能获取token/key")
 	}
 
 	// Load config and save device
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Printf("❌ 加载配置失败: %v\n", err)
-		os.Exit(1)
+		return nil, nil, err
 	}
 
 	// Create config device
@@ -819,7 +813,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(d.GetIP(), int(deviceID), d.GetPort())
 		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
-		return device, ccDevice
+		return device, ccDevice, nil
 	default:
 		// Create Air Conditioner (default)
 		acDevice := ac.NewAirConditioner(
@@ -834,30 +828,27 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 		if version == 3 && token != "" && key != "" {
 			tokenBytes, err := hex.DecodeString(token)
 			if err != nil {
-				fmt.Printf("❌ 无效的Token: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("无效的Token: %w", err)
 			}
 			keyBytes, err := hex.DecodeString(key)
 			if err != nil {
-				fmt.Printf("❌ 无效的Key: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
 			fmt.Println("🔐 正在认证...")
 			if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
-				fmt.Printf("❌ 认证失败: %v\n", err)
-				os.Exit(1)
+				return nil, nil, fmt.Errorf("认证失败: %w", err)
 			}
 			fmt.Println("✅ 认证成功")
 		}
-		return device, acDevice
+		return device, acDevice, nil
 	}
 }
 
-func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities] [--energy]")
 		fmt.Println("   或者: midea status <host> --id <device-id> --token <token> --key <key>")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for status command")
 	}
 
 	// Parse --auto, --capabilities and --energy flags
@@ -885,20 +876,28 @@ func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceT
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Direct mode: if deviceID is provided, use direct connection
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
 		// Auto mode: discover device and get token/key automatically
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		// Normal mode: load from config
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device (currently only AC is fully supported)
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
@@ -932,7 +931,7 @@ func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceT
 	// Refresh state
 	if err := acDevice.Refresh(ctx); err != nil {
 		fmt.Printf("❌ 查询失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	printACState(acDevice)
@@ -941,6 +940,7 @@ func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceT
 	if showEnergy {
 		printEnergyUsage(acDevice)
 	}
+	return nil
 }
 
 func printCapabilities(acDevice *ac.AirConditioner) {
@@ -1119,7 +1119,7 @@ func printEnergyUsage(acDevice *ac.AirConditioner) {
 	fmt.Println("╚════════════════════════════════════════╝")
 }
 
-func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 3 {
 		action := "on"
 		if !on {
@@ -1127,7 +1127,7 @@ func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int,
 		}
 		fmt.Printf("❌ 用法: midea %s <name|id> [--auto]\n", action)
 		fmt.Println("   或者: midea %s <host> --id <device-id> --token <token> --key <key>")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for %s command", action)
 	}
 
 	// Parse --auto flag
@@ -1141,18 +1141,26 @@ func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int,
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Direct mode: if deviceID is provided, use direct connection
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
@@ -1167,7 +1175,7 @@ func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int,
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
 		fmt.Printf("❌ 控制失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	action := "已开机 ✅"
@@ -1175,14 +1183,15 @@ func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int,
 		action = "已关机 ⏹️"
 	}
 	fmt.Printf("✅ %s %s\n", device.Name, action)
+	return nil
 }
 
-func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea temp <name|id> <温度> [--auto]")
 		fmt.Println("   或者: midea temp <host> <温度> --id <device-id> --token <token> --key <key>")
 		fmt.Println("   温度范围: 16-30°C")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for temp command")
 	}
 
 	// Parse --auto flag
@@ -1197,30 +1206,38 @@ func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceTok
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Direct mode: if deviceID is provided, use direct connection
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	temp, err := strconv.ParseFloat(tempArg, 64)
 	if err != nil {
 		fmt.Println("❌ 无效的温度值")
 		fmt.Println("   温度范围: 16-30°C")
-		os.Exit(1)
+		return fmt.Errorf("invalid temperature value: %s", tempArg)
 	}
 
 	if temp < 16 || temp > 30 {
 		fmt.Println("❌ 温度超出范围")
 		fmt.Println("   温度范围: 16-30°C")
-		os.Exit(1)
+		return fmt.Errorf("temperature out of range: %.0f (valid range: 16-30°C)", temp)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1236,17 +1253,18 @@ func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
 		fmt.Printf("❌ 控制失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Printf("✅ %s 温度已设置为 %.0f°C\n", device.Name, temp)
+	return nil
 }
 
-func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea mode <name|id> <模式> [--auto]")
 		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for mode command")
 	}
 
 	// Parse --auto flag
@@ -1261,18 +1279,26 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	// Map mode string to OperationalMode
 	modeMap := map[string]ac.OperationalMode{
@@ -1287,7 +1313,7 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	if !ok {
 		fmt.Printf("❌ 未知模式: %s\n", modeArg)
 		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
-		os.Exit(1)
+		return fmt.Errorf("unknown mode: %s", modeArg)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1303,7 +1329,7 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
 		fmt.Printf("❌ 控制失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	modeNames := map[ac.OperationalMode]string{
@@ -1314,13 +1340,14 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 		ac.OperationalModeFanOnly: "送风",
 	}
 	fmt.Printf("✅ %s 模式已设置为 %s\n", device.Name, modeNames[mode])
+	return nil
 }
 
-func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea fan <name|id> <风速> [--auto]")
 		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for fan command")
 	}
 
 	// Parse --auto flag
@@ -1335,18 +1362,26 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	// Map speed string to FanSpeed
 	speedMap := map[string]ac.FanSpeed{
@@ -1361,7 +1396,7 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	if !ok {
 		fmt.Printf("❌ 未知风速: %s\n", speedStr)
 		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
-		os.Exit(1)
+		return fmt.Errorf("unknown fan speed: %s", speedStr)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1377,7 +1412,7 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
 		fmt.Printf("❌ 控制失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	speedNames := map[ac.FanSpeed]string{
@@ -1388,13 +1423,14 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		ac.FanSpeedSilent: "静音",
 	}
 	fmt.Printf("✅ %s 风速已设置为 %s\n", device.Name, speedNames[speed])
+	return nil
 }
 
-func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 4 {
 		fmt.Println("❌ 用法: midea swing <name|id> <模式> [--auto]")
 		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for swing command")
 	}
 
 	// Parse --auto flag
@@ -1409,18 +1445,26 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	// Map swing string to SwingMode
 	swingMap := map[string]ac.SwingMode{
@@ -1434,7 +1478,7 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	if !ok {
 		fmt.Printf("❌ 未知摆风模式: %s\n", swingStr)
 		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
-		os.Exit(1)
+		return fmt.Errorf("unknown swing mode: %s", swingStr)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1450,7 +1494,7 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
 		fmt.Printf("❌ 控制失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	swingNames := map[ac.SwingMode]string{
@@ -1460,10 +1504,11 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 		ac.SwingModeBoth:       "全方位摆风",
 	}
 	fmt.Printf("✅ %s 摆风已设置为 %s\n", device.Name, swingNames[swingMode])
+	return nil
 }
 
 // handleSet handles the set command for multi-parameter control
-func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea set <name|id> [选项] [--auto]")
 		fmt.Println("   选项:")
@@ -1476,7 +1521,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		fmt.Println("   示例:")
 		fmt.Println("     midea set 客厅 --temp 26 --mode cool --fan high")
 		fmt.Println("     midea set 客厅 --power on --temp 24")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for set command")
 	}
 
 	// Parse --auto flag
@@ -1491,18 +1536,26 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	// Parse flags
 	var hasChanges bool
@@ -1513,12 +1566,12 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		case "--temp":
 			if i+1 >= len(os.Args) {
 				fmt.Println("❌ --temp 需要指定温度")
-				os.Exit(1)
+				return fmt.Errorf("--temp requires a temperature value")
 			}
 			temp, err := strconv.ParseFloat(os.Args[i+1], 64)
 			if err != nil || temp < 16 || temp > 30 {
 				fmt.Printf("❌ 无效的温度: %s (范围: 16-30°C)\n", os.Args[i+1])
-				os.Exit(1)
+				return fmt.Errorf("invalid temperature: %s", os.Args[i+1])
 			}
 			acDevice.SetTargetTemperature(temp)
 			changes = append(changes, fmt.Sprintf("温度 %.0f°C", temp))
@@ -1528,7 +1581,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		case "--mode":
 			if i+1 >= len(os.Args) {
 				fmt.Println("❌ --mode 需要指定模式")
-				os.Exit(1)
+				return fmt.Errorf("--mode requires a mode value")
 			}
 			modeMap := map[string]ac.OperationalMode{
 				"cool": ac.OperationalModeCool,
@@ -1540,7 +1593,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 			mode, ok := modeMap[os.Args[i+1]]
 			if !ok {
 				fmt.Printf("❌ 无效的模式: %s\n", os.Args[i+1])
-				os.Exit(1)
+				return fmt.Errorf("invalid mode: %s", os.Args[i+1])
 			}
 			acDevice.SetOperationalMode(mode)
 			modeNames := map[ac.OperationalMode]string{
@@ -1557,7 +1610,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		case "--fan":
 			if i+1 >= len(os.Args) {
 				fmt.Println("❌ --fan 需要指定风速")
-				os.Exit(1)
+				return fmt.Errorf("--fan requires a fan speed value")
 			}
 			speedMap := map[string]ac.FanSpeed{
 				"auto":   ac.FanSpeedAuto,
@@ -1569,7 +1622,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 			speed, ok := speedMap[os.Args[i+1]]
 			if !ok {
 				fmt.Printf("❌ 无效的风速: %s\n", os.Args[i+1])
-				os.Exit(1)
+				return fmt.Errorf("invalid fan speed: %s", os.Args[i+1])
 			}
 			acDevice.SetFanSpeed(speed)
 			fanNames := map[ac.FanSpeed]string{
@@ -1586,7 +1639,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		case "--swing":
 			if i+1 >= len(os.Args) {
 				fmt.Println("❌ --swing 需要指定摆风模式")
-				os.Exit(1)
+				return fmt.Errorf("--swing requires a swing mode value")
 			}
 			swingMap := map[string]ac.SwingMode{
 				"off":        ac.SwingModeOff,
@@ -1597,7 +1650,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 			swing, ok := swingMap[os.Args[i+1]]
 			if !ok {
 				fmt.Printf("❌ 无效的摆风模式: %s\n", os.Args[i+1])
-				os.Exit(1)
+				return fmt.Errorf("invalid swing mode: %s", os.Args[i+1])
 			}
 			acDevice.SetSwingMode(swing)
 			swingNames := map[ac.SwingMode]string{
@@ -1613,12 +1666,12 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		case "--power":
 			if i+1 >= len(os.Args) {
 				fmt.Println("❌ --power 需要指定 on 或 off")
-				os.Exit(1)
+				return fmt.Errorf("--power requires on or off value")
 			}
 			power := os.Args[i+1]
 			if power != "on" && power != "off" {
 				fmt.Printf("❌ 无效的电源状态: %s (应为 on 或 off)\n", power)
-				os.Exit(1)
+				return fmt.Errorf("invalid power state: %s", power)
 			}
 			isOn := power == "on"
 			acDevice.SetPowerState(isOn)
@@ -1634,7 +1687,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 
 	if !hasChanges {
 		fmt.Println("❌ 未指定任何更改")
-		os.Exit(1)
+		return fmt.Errorf("no changes specified")
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1647,14 +1700,15 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
 		fmt.Printf("❌ 控制失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Printf("✅ %s 已设置: %s\n", device.Name, strings.Join(changes, ", "))
+	return nil
 }
 
 // handleQuery handles the query command for querying device properties
-func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) {
+func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea query <name|id> [key] [--all] [--auto]")
 		fmt.Println("   key: 属性名称 (如: temp, mode, fan, swing, power)")
@@ -1665,7 +1719,7 @@ func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceTo
 		fmt.Println("     midea query 客厅              # 显示所有属性")
 		fmt.Println("     midea query 客厅 temp         # 只显示温度")
 		fmt.Println("     midea query 客厅 --auto       # 自动发现设备")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for query command")
 	}
 
 	// Parse flags and arguments
@@ -1690,18 +1744,26 @@ func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceTo
 
 	var device *config.Device
 	var deviceObj interface{}
+	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if deviceID > 0 {
-		device, deviceObj = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
+		device, deviceObj, err = getDeviceDirect(identifier, deviceID, deviceToken, deviceKey, deviceTypeStr)
 	} else if autoMode {
-		device, deviceObj = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj = getDevice(configPath, identifier, deviceTypeStr)
+		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+	}
+	if err != nil {
+		return err
 	}
 
 	// Get AC device
-	acDevice := mustGetACDevice(deviceObj)
+	acDevice, err := mustGetACDevice(deviceObj)
+	if err != nil {
+		fmt.Println("❌ " + err.Error())
+		return err
+	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
@@ -1713,18 +1775,22 @@ func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	// Refresh state
 	if err := acDevice.Refresh(ctx); err != nil {
 		fmt.Printf("❌ 查询失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Display results
 	if showAll || key == "" {
 		printACState(acDevice)
 	} else {
-		printSpecificAttribute(acDevice, key)
+		if err := printSpecificAttribute(acDevice, key); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func printSpecificAttribute(acDevice *ac.AirConditioner, key string) {
+
+func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
 	fmt.Println()
 
 	switch strings.ToLower(key) {
@@ -1815,15 +1881,16 @@ func printSpecificAttribute(acDevice *ac.AirConditioner, key string) {
 		fmt.Println("  power, power_state                   - 电源状态")
 		fmt.Println("  eco                                  - ECO模式")
 		fmt.Println("  turbo                                - 强力模式")
-		os.Exit(1)
+		return fmt.Errorf("unknown attribute: %s", key)
 	}
+	return nil
 }
 
 // handleDownload handles the download command for downloading device protocol and plugin
-func handleDownload(configPath string, region string) {
+func handleDownload(configPath string, region string) error {
 	if len(os.Args) < 3 {
 		fmt.Println("❌ 用法: midea download <host> [--account <账号> --password <密码>]")
-		os.Exit(1)
+		return fmt.Errorf("insufficient arguments for download command")
 	}
 
 	host := os.Args[2]
@@ -1862,12 +1929,11 @@ func handleDownload(configPath string, region string) {
 	devices, err := msmart.Discover(ctx, discoverConfig)
 	if err != nil {
 		fmt.Printf("❌ 发现设备失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	if len(devices) == 0 {
-		fmt.Println("❌ 未找到设备")
-		os.Exit(1)
+		return fmt.Errorf("未找到设备")
 	}
 
 	// Get the first discovered device
@@ -1878,8 +1944,7 @@ func handleDownload(configPath string, region string) {
 	sn := d.GetSN()
 
 	if sn == nil || *sn == "" {
-		fmt.Println("❌ 设备没有 SN,无法下载协议")
-		os.Exit(1)
+		return fmt.Errorf("设备没有 SN,无法下载协议")
 	}
 
 	fmt.Printf("✅ 发现设备: 类型=%02X, SN=%s\n", deviceType, *sn)
@@ -1898,13 +1963,13 @@ func handleDownload(configPath string, region string) {
 	cloud, err = msmart.NewSmartHomeCloud(region, accountPtr, passwordPtr, false, nil)
 	if err != nil {
 		fmt.Printf("❌ 创建云端客户端失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Login to cloud
 	if err := cloud.Login(false); err != nil {
 		fmt.Printf("❌ 云端登录失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	fmt.Println("✅ 云端登录成功")
@@ -1914,13 +1979,13 @@ func handleDownload(configPath string, region string) {
 	luaName, luaContent, err := cloud.GetProtocolLua(deviceType, *sn)
 	if err != nil {
 		fmt.Printf("❌ 下载 Lua 协议失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Save Lua file
 	if err := os.WriteFile(luaName, []byte(luaContent), 0644); err != nil {
 		fmt.Printf("❌ 保存 Lua 文件失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	fmt.Printf("✅ Lua 协议已保存: %s\n", luaName)
 
@@ -1929,15 +1994,16 @@ func handleDownload(configPath string, region string) {
 	pluginName, pluginData, err := cloud.GetPlugin(deviceType, *sn)
 	if err != nil {
 		fmt.Printf("❌ 下载插件失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Save plugin file
 	if err := os.WriteFile(pluginName, pluginData, 0644); err != nil {
 		fmt.Printf("❌ 保存插件文件失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	fmt.Printf("✅ 插件已保存: %s\n", pluginName)
 
 	fmt.Println("\n✅ 下载完成!")
+	return nil
 }
