@@ -95,7 +95,7 @@ func (e *AuthenticationError) Unwrap() error {
 
 // Protocol defines the interface for LAN protocol
 //
-// V2 Packet Overview
+// # V2 Packet Overview
 //
 // Header: 40 bytes
 //
@@ -283,7 +283,7 @@ const AuthenticationExpiration = 12 * time.Hour
 
 // _LanProtocolV3 represents Midea LAN protocol V3
 //
-// V3 Packet Overview
+// # V3 Packet Overview
 //
 // Header: 6 bytes
 //
@@ -347,9 +347,9 @@ const AuthenticationExpiration = 12 * time.Hour
 //
 // Notes
 //
-//	- For padding purposes the 2 byte request ID is included in size,
-//	  but not in the size field
-//	- When used for device command/response, the payload contains a V2 packet
+//   - For padding purposes the 2 byte request ID is included in size,
+//     but not in the size field
+//   - When used for device command/response, the payload contains a V2 packet
 type _LanProtocolV3 struct {
 	*_LanProtocol
 	packetID           uint16
@@ -692,7 +692,7 @@ func (p *_LanProtocolV3) Authenticate(token []byte, key []byte) error {
 	// Set expiration time
 	p.localKeyExpiration = time.Now().UTC().Add(AuthenticationExpiration)
 
-	slog.Info("Authentication successful",
+	slog.Debug("Authentication successful",
 		"peer", p.Peer(),
 		"expiration", p.localKeyExpiration.Format(time.RFC3339),
 		"local_key", fmt.Sprintf("%x", p.localKey))
@@ -715,7 +715,7 @@ type LAN struct {
 	mu                    sync.Mutex
 	conn                  net.Conn // Store connection for deadline management
 	readTimeout           time.Duration
-	disconnectOnTimeout   bool     // Whether to disconnect on timeout (default: false)
+	disconnectOnTimeout   bool // Whether to disconnect on timeout (default: false)
 }
 
 // Retries is the default number of retries
@@ -764,21 +764,21 @@ func (l *LAN) SetLocalKey(localKey []byte, expiration time.Time) bool {
 	if expiration.IsZero() || time.Now().UTC().After(expiration) {
 		return false
 	}
-	
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	
+
 	// Create V3 protocol if not exists
 	if l.protocolV3 == nil {
 		l.protocolVersion = 3
 		l.protocolV3 = NewLanProtocolV3()
 		l.protocol = l.protocolV3
 	}
-	
+
 	// Set the local key and expiration
 	l.protocolV3.localKey = localKey
 	l.protocolV3.localKeyExpiration = expiration
-	
+
 	return true
 }
 
@@ -826,7 +826,7 @@ func (l *LAN) alive() bool {
 // Connect establishes a connection to the device
 // Note: This function does NOT acquire the mutex lock. Callers must hold l.mu.Lock().
 func (l *LAN) connect() error {
-	slog.Info("Creating new connection", "ip", l.ip, "port", l.port)
+	slog.Debug("Creating new connection", "ip", l.ip, "port", l.port)
 
 	// Connect with timeout
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", l.ip, l.port), 5*time.Second)
@@ -924,7 +924,7 @@ func (l *LAN) Authenticate(token Token, key Key, retries int) error {
 		return &ProtocolError{Message: "protocol V3 is nil"}
 	}
 
-	slog.Info("Authenticating", "peer", l.protocol.Peer())
+	slog.Debug("Authenticating", "peer", l.protocol.Peer())
 
 	// Attempt to authenticate
 	for retries > 0 {
@@ -1087,7 +1087,7 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 				// Connection is still valid, don't disconnect
 				return nil, rpcTimeoutErr
 			}
-			
+
 			// Check if it's a connection error
 			isConnectionError := errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed)
 			if isConnectionError {
@@ -1099,7 +1099,7 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 				}
 				return nil, &ProtocolError{Message: "Connection error.", Cause: err}
 			}
-			
+
 			// Other errors: disconnect and return
 			l.disconnect()
 			return nil, err
@@ -1267,12 +1267,12 @@ func PacketEncode(deviceID int64, command []byte) ([]byte, error) {
 	// Compute total length
 	length := 40 + len(encryptedPayload) + 16
 
-	header := []byte{0x5A, 0x5A} // Start of packet
-	header = append(header, 0x01, 0x11) // Message type
+	header := []byte{0x5A, 0x5A}                                      // Start of packet
+	header = append(header, 0x01, 0x11)                               // Message type
 	header = binary.LittleEndian.AppendUint16(header, uint16(length)) // Packet size
-	header = append(header, 0x20, 0x00) // Magic bytes
-	header = append(header, 0, 0, 0, 0) // Message ID
-	header = append(header, packetTimestamp()...) // Timestamp
+	header = append(header, 0x20, 0x00)                               // Magic bytes
+	header = append(header, 0, 0, 0, 0)                               // Message ID
+	header = append(header, packetTimestamp()...)                     // Timestamp
 
 	// Device ID (8 bytes, little endian)
 	deviceIDBytes := make([]byte, 8)

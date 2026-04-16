@@ -55,37 +55,37 @@ var DiscoveryPorts = []int{6445, 20086}
 // If no interfaces are found, returns the default 255.255.255.255
 func getBroadcastAddresses() []string {
 	var addresses []string
-	
+
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		slog.Warn("Failed to get network interfaces", "error", err)
 		return []string{IPv4Broadcast}
 	}
-	
+
 	for _, iface := range interfaces {
 		// Skip loopback and non-up interfaces
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
-		
+
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
 		}
-		
+
 		for _, addr := range addrs {
 			// Only process IPv4 addresses
 			ipNet, ok := addr.(*net.IPNet)
 			if !ok {
 				continue
 			}
-			
+
 			// Convert to 4-byte representation
 			ip := ipNet.IP.To4()
 			if ip == nil {
 				continue // Not IPv4
 			}
-			
+
 			mask := ipNet.Mask
 			if len(mask) != 4 {
 				// Convert 16-byte mask to 4-byte mask
@@ -95,25 +95,25 @@ func getBroadcastAddresses() []string {
 					continue
 				}
 			}
-			
+
 			// Calculate broadcast address: IP | (^Mask)
 			broadcast := make(net.IP, 4)
 			for i := 0; i < 4; i++ {
 				broadcast[i] = ip[i] | ^mask[i]
 			}
-			
+
 			broadcastStr := broadcast.String()
 			verboseLog("Found broadcast address %s for interface %s (%s)", broadcastStr, iface.Name, ip)
 			addresses = append(addresses, broadcastStr)
 		}
 	}
-	
+
 	// If no interfaces found, use the default broadcast address
 	if len(addresses) == 0 {
 		slog.Warn("No suitable network interfaces found, using default broadcast address")
 		return []string{IPv4Broadcast}
 	}
-	
+
 	return addresses
 }
 
@@ -239,7 +239,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 		targetAddresses = []string{config.Target}
 		verboseLog("Sending discovery to specific target: %s", config.Target)
 	}
-	
+
 	for _, port := range DiscoveryPorts {
 		for _, targetAddr := range targetAddresses {
 			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", targetAddr, port))
@@ -536,7 +536,7 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 	port := int(binary.LittleEndian.Uint16(decryptedData[4:6]))
 
 	if ipAddress != ip {
-		slog.Info("Reported device IP does not match received IP, using received IP", "reported", ipAddress, "received", ip)
+		slog.Debug("Reported device IP does not match received IP, using received IP", "reported", ipAddress, "received", ip)
 	}
 
 	// Extract serial number

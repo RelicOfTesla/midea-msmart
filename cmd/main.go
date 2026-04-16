@@ -64,6 +64,113 @@ type GlobalFlags struct {
 	Name             string
 }
 
+// ============================================================================
+// Output Types with TextMarshaler and JSONMarshaler
+// ============================================================================
+
+// ACState represents AC device state for output
+type ACState struct {
+	Power              *bool    `json:"power"`
+	TargetTemperature  float64  `json:"target_temperature"`
+	IndoorTemperature  *float64 `json:"indoor_temperature,omitempty"`
+	OutdoorTemperature *float64 `json:"outdoor_temperature,omitempty"`
+	Mode               string   `json:"mode"`
+	FanSpeed           string   `json:"fan_speed"`
+	SwingMode          string   `json:"swing_mode"`
+	Eco                bool     `json:"eco"`
+	Turbo              bool     `json:"turbo"`
+}
+
+// MarshalText implements encoding.TextMarshaler for ACState
+func (s ACState) MarshalText() ([]byte, error) {
+	var buf strings.Builder
+	buf.WriteString("\n╔════════════════════════════════════════╗\n")
+	buf.WriteString("║           📊 空调状态                  ║\n")
+	buf.WriteString("╠════════════════════════════════════════╣\n")
+
+	if s.Power != nil && *s.Power {
+		buf.WriteString("║  电源: 🟢 开启                         ║\n")
+	} else {
+		buf.WriteString("║  电源: 🔴 关闭                         ║\n")
+		buf.WriteString("╚════════════════════════════════════════╝\n")
+		return []byte(buf.String()), nil
+	}
+
+	buf.WriteString(fmt.Sprintf("║  目标温度: %.0f°C                      ║\n", s.TargetTemperature))
+	if s.IndoorTemperature != nil {
+		buf.WriteString(fmt.Sprintf("║  室内温度: %.1f°C                      \n", *s.IndoorTemperature))
+	}
+	if s.OutdoorTemperature != nil {
+		buf.WriteString(fmt.Sprintf("║  室外温度: %.1f°C                      \n", *s.OutdoorTemperature))
+	}
+	buf.WriteString(fmt.Sprintf("║  运行模式: %-24s║\n", s.Mode))
+	buf.WriteString(fmt.Sprintf("║  风速: %-30s║\n", s.FanSpeed))
+	buf.WriteString(fmt.Sprintf("║  摆风: %-30s║\n", s.SwingMode))
+
+	if s.Eco {
+		buf.WriteString("║  🌿 ECO模式: 开启                      ║\n")
+	}
+	if s.Turbo {
+		buf.WriteString("║  🚀 强力模式: 开启                     ║\n")
+	}
+
+	buf.WriteString("╚════════════════════════════════════════╝\n")
+	return []byte(buf.String()), nil
+}
+
+// MarshalJSON implements json.Marshaler for ACState
+// Returns structured JSON object instead of text table
+func (s ACState) MarshalJSON() ([]byte, error) {
+	// Create an alias to avoid infinite recursion
+	type Alias ACState
+	return json.Marshal(Alias(s))
+}
+
+// EnergyUsage represents energy usage data for output
+type EnergyUsage struct {
+	RealTimePower *float64 `json:"real_time_power_w,omitempty"`
+	CurrentMonth  *float64 `json:"current_month_kwh,omitempty"`
+	TotalEnergy   *float64 `json:"total_energy_kwh,omitempty"`
+}
+
+// MarshalText implements encoding.TextMarshaler for EnergyUsage
+func (e EnergyUsage) MarshalText() ([]byte, error) {
+	var buf strings.Builder
+	buf.WriteString("\n╔════════════════════════════════════════╗\n")
+	buf.WriteString("║           ⚡ 能耗信息                  ║\n")
+	buf.WriteString("╠════════════════════════════════════════╣\n")
+
+	hasEnergyData := false
+
+	if e.RealTimePower != nil {
+		buf.WriteString(fmt.Sprintf("║  实时功率: %.1f W                      \n", *e.RealTimePower))
+		hasEnergyData = true
+	}
+	if e.CurrentMonth != nil {
+		buf.WriteString(fmt.Sprintf("║  本月能耗: %.2f kWh                    \n", *e.CurrentMonth))
+		hasEnergyData = true
+	}
+	if e.TotalEnergy != nil {
+		buf.WriteString(fmt.Sprintf("║  累计能耗: %.2f kWh                    \n", *e.TotalEnergy))
+		hasEnergyData = true
+	}
+
+	if !hasEnergyData {
+		buf.WriteString("║  ⚠️  无能耗数据                        ║\n")
+	}
+
+	buf.WriteString("╚════════════════════════════════════════╝\n")
+	return []byte(buf.String()), nil
+}
+
+// MarshalJSON implements json.Marshaler for EnergyUsage
+// Returns structured JSON object instead of text table
+func (e EnergyUsage) MarshalJSON() ([]byte, error) {
+	// Create an alias to avoid infinite recursion
+	type Alias EnergyUsage
+	return json.Marshal(Alias(e))
+}
+
 // setupFlags 设置命令行参数
 func setupFlags(flags *GlobalFlags) {
 	// Global flags
@@ -117,10 +224,13 @@ func setupLogger(jsonMode bool) {
 func main() {
 	flags := &GlobalFlags{}
 	setupFlags(flags)
-	
+
+	// 先解析命令行参数
+	pflag.Parse()
+
 	// 设置日志输出（根据 --json 参数）
 	setupLogger(flags.JSON)
-	
+
 	if err := run(flags); err != nil {
 		// Print error if not already printed
 		slog.Error("错误", "error", err)
@@ -924,7 +1034,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 					// Update device in config, not the local variable
 					device.LocalKey = hex.EncodeToString(localKey)
 					device.LocalKeyExpire = expiration.Format(time.RFC3339)
-					
+
 					// Must update device in cfg.Devices, because AddDevice created a copy
 					for i, d := range cfg.Devices {
 						if d.ID == device.ID {
@@ -933,7 +1043,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 							break
 						}
 					}
-					
+
 					if err := cfg.Save(configPath); err != nil {
 						slog.Warn("保存 LocalKey 失败", "error", err)
 					}
@@ -949,7 +1059,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 				if localKey, expiration := acDevice.GetLocalKey(); localKey != nil {
 					device.LocalKey = hex.EncodeToString(localKey)
 					device.LocalKeyExpire = expiration.Format(time.RFC3339)
-					
+
 					// Must update device in cfg.Devices, because AddDevice created a copy
 					for i, d := range cfg.Devices {
 						if d.ID == device.ID {
@@ -958,7 +1068,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 							break
 						}
 					}
-					
+
 					if err := cfg.Save(configPath); err != nil {
 						slog.Warn("保存 LocalKey 失败", "error", err)
 					}
@@ -985,27 +1095,19 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
-		if flags.JSON {
-			printErrorJSON(err)
-		}
 		return err
 	}
 
 	// Get AC device (currently only AC is fully supported)
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		if flags.JSON {
-			printErrorJSON(err)
-		}
 		slog.Error(err.Error())
 		return err
 	}
 
-	// Non-JSON mode: print connection info
-	if !flags.JSON {
-		slog.Info("目标设备", "name", device.Name, "ip", device.IP)
-		slog.Info("正在连接...")
-	}
+	// Print connection info
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1014,26 +1116,18 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 	// Get capabilities if requested
 	if flags.ShowCapabilities || flags.CapabilitiesFile != "" {
 		if err := acDevice.GetCapabilities(ctx); err != nil {
-			if !flags.JSON {
-				slog.Warn("获取设备能力失败", "error", err)
-			}
+			slog.Warn("获取设备能力失败", "error", err)
 		} else {
 			// If a file path is specified, write to file
 			if flags.CapabilitiesFile != "" {
 				if err := writeCapabilitiesToYAML(acDevice, flags.CapabilitiesFile); err != nil {
-					if !flags.JSON {
-						slog.Error("写入能力信息到文件失败", "error", err)
-					}
+					slog.Error("写入能力信息到文件失败", "error", err)
 				} else {
-					if !flags.JSON {
-						slog.Info("设备能力已写入", "file", flags.CapabilitiesFile)
-					}
+					slog.Info("设备能力已写入", "file", flags.CapabilitiesFile)
 				}
 			} else {
 				// Display capabilities to screen
-				if !flags.JSON {
-					printCapabilities(acDevice)
-				}
+				printCapabilities(acDevice)
 			}
 		}
 	}
@@ -1045,29 +1139,16 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 
 	// Refresh state
 	if err := acDevice.Refresh(ctx); err != nil {
-		if flags.JSON {
-			printErrorJSON(err)
-		}
-		if !flags.JSON {
-			slog.Error("查询失败", "error", err)
-		}
+		slog.Error("查询失败", "error", err)
 		return err
 	}
 
-	// Print state (JSON or table format)
-	if flags.JSON {
-		printACStateJSON(acDevice)
-	} else {
-		printACState(acDevice)
-	}
+	// Print state
+	printACState(acDevice)
 
 	// Display energy usage if requested
 	if flags.ShowEnergy {
-		if flags.JSON {
-			printEnergyUsageJSON(acDevice)
-		} else {
-			printEnergyUsage(acDevice)
-		}
+		printEnergyUsage(acDevice)
 	}
 	return nil
 }
@@ -1143,35 +1224,7 @@ func writeCapabilitiesToYAML(acDevice *ac.AirConditioner, filename string) error
 	return nil
 }
 
-// ACStateJSON represents AC device state in JSON format
-type ACStateJSON struct {
-	Power              *bool    `json:"power"`
-	TargetTemperature  float64  `json:"target_temperature"`
-	IndoorTemperature  *float64 `json:"indoor_temperature,omitempty"`
-	OutdoorTemperature *float64 `json:"outdoor_temperature,omitempty"`
-	Mode               string   `json:"mode"`
-	FanSpeed           string   `json:"fan_speed"`
-	SwingMode          string   `json:"swing_mode"`
-	Eco                bool     `json:"eco"`
-	Turbo              bool     `json:"turbo"`
-}
-
-// EnergyUsageJSON represents energy usage data in JSON format
-type EnergyUsageJSON struct {
-	RealTimePower  *float64 `json:"real_time_power_w,omitempty"`
-	CurrentMonth   *float64 `json:"current_month_kwh,omitempty"`
-	TotalEnergy    *float64 `json:"total_energy_kwh,omitempty"`
-}
-
-// printErrorJSON prints an error message in JSON format to stdout
-func printErrorJSON(err error) {
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(map[string]string{"error": err.Error()})
-}
-
-// printACStateJSON prints AC device state in JSON format to stdout
-func printACStateJSON(acDevice *ac.AirConditioner) {
+func printACState(acDevice *ac.AirConditioner) {
 	// Get mode name
 	modeNames := map[ac.OperationalMode]string{
 		ac.OperationalModeCool:    "cool",
@@ -1196,7 +1249,7 @@ func printACStateJSON(acDevice *ac.AirConditioner) {
 	swingName := SwingNames[acDevice.SwingMode()]
 
 	// Create state struct
-	state := ACStateJSON{
+	state := ACState{
 		Power:              acDevice.PowerState(),
 		TargetTemperature:  acDevice.TargetTemperature(),
 		IndoorTemperature:  acDevice.IndoorTemperature(),
@@ -1208,115 +1261,20 @@ func printACStateJSON(acDevice *ac.AirConditioner) {
 		Turbo:              acDevice.Turbo(),
 	}
 
-	// Output JSON
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(state)
+	// Output using slog (will automatically call MarshalText/MarshalJSON)
+	slog.Info("空调状态", "state", state)
 }
 
-// printEnergyUsageJSON prints energy usage data in JSON format to stdout
-func printEnergyUsageJSON(acDevice *ac.AirConditioner) {
-	energy := EnergyUsageJSON{
+func printEnergyUsage(acDevice *ac.AirConditioner) {
+	// Create energy usage struct
+	energy := EnergyUsage{
 		RealTimePower: acDevice.GetRealTimePowerUsage(ac.EnergyDataFormatBCD),
 		CurrentMonth:  acDevice.GetCurrentEnergyUsage(ac.EnergyDataFormatBCD),
 		TotalEnergy:   acDevice.GetTotalEnergyUsage(ac.EnergyDataFormatBCD),
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(energy)
-}
-
-func printACState(acDevice *ac.AirConditioner) {
-	fmt.Println("\n╔════════════════════════════════════════╗")
-	fmt.Println("║           📊 空调状态                  ║")
-	fmt.Println("╠════════════════════════════════════════╣")
-
-	// Power state
-	powerState := acDevice.PowerState()
-	if powerState != nil && *powerState {
-		fmt.Println("║  电源: 🟢 开启                         ║")
-	} else {
-		fmt.Println("║  电源: 🔴 关闭                         ║")
-		fmt.Println("╚════════════════════════════════════════╝")
-		return
-	}
-
-	// Temperature
-	fmt.Printf("║  目标温度: %.0f°C                      ║\n", acDevice.TargetTemperature())
-	if temp := acDevice.IndoorTemperature(); temp != nil {
-		fmt.Printf("║  室内温度: %.1f°C                      ║\n", *temp)
-	}
-	if temp := acDevice.OutdoorTemperature(); temp != nil {
-		fmt.Printf("║  室外温度: %.1f°C                      ║\n", *temp)
-	}
-
-	// Mode
-	modeNames := map[ac.OperationalMode]string{
-		ac.OperationalModeCool:    "❄️ 制冷",
-		ac.OperationalModeHeat:    "🔥 制热",
-		ac.OperationalModeAuto:    "🔄 自动",
-		ac.OperationalModeDry:     "💧 除湿",
-		ac.OperationalModeFanOnly: "🌀 送风",
-	}
-	modeName := modeNames[acDevice.OperationalMode()]
-	fmt.Printf("║  运行模式: %-24s║\n", modeName)
-
-	// Fan speed
-	fanSpeed := acDevice.FanSpeed()
-	var fanName string
-	switch fs := fanSpeed.(type) {
-	case ac.FanSpeed:
-		fanName = SpeedNames[fs]
-	default:
-		fanName = fmt.Sprintf("%v", fs)
-	}
-	fmt.Printf("║  风速: %-30s║\n", fanName)
-
-	// Swing mode
-	fmt.Printf("║  摆风: %-30s║\n", SwingNames[acDevice.SwingMode()])
-
-	// Additional features
-	if acDevice.Eco() {
-		fmt.Println("║  🌿 ECO模式: 开启                      ║")
-	}
-	if acDevice.Turbo() {
-		fmt.Println("║  🚀 强力模式: 开启                     ║")
-	}
-
-	fmt.Println("╚════════════════════════════════════════╝")
-}
-
-func printEnergyUsage(acDevice *ac.AirConditioner) {
-	fmt.Println("\n╔════════════════════════════════════════╗")
-	fmt.Println("║           ⚡ 能耗信息                  ║")
-	fmt.Println("╠════════════════════════════════════════╣")
-
-	hasEnergyData := false
-
-	// Real-time power
-	if power := acDevice.GetRealTimePowerUsage(ac.EnergyDataFormatBCD); power != nil {
-		fmt.Printf("║  实时功率: %.1f W                      ║\n", *power)
-		hasEnergyData = true
-	}
-
-	// Current energy usage (current month)
-	if current := acDevice.GetCurrentEnergyUsage(ac.EnergyDataFormatBCD); current != nil {
-		fmt.Printf("║  本月能耗: %.2f kWh                    ║\n", *current)
-		hasEnergyData = true
-	}
-
-	// Total energy usage
-	if total := acDevice.GetTotalEnergyUsage(ac.EnergyDataFormatBCD); total != nil {
-		fmt.Printf("║  累计能耗: %.2f kWh                    ║\n", *total)
-		hasEnergyData = true
-	}
-
-	if !hasEnergyData {
-		fmt.Println("║  ⚠️  无能耗数据                        ║")
-	}
-
-	fmt.Println("╚════════════════════════════════════════╝")
+	// Output using slog (will automatically call MarshalText/MarshalJSON)
+	slog.Info("能耗信息", "energy", energy)
 }
 
 func handlePower(configPath string, flags *GlobalFlags, deviceTypeStr string, on bool, identifier string) error {
