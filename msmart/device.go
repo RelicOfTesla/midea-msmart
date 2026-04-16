@@ -2,6 +2,7 @@
 package msmart
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -12,8 +13,8 @@ import (
 
 // Global LAN cache to reuse authenticated connections
 var (
-	lanCache     = make(map[string]*LAN)
-	lanCacheMu   sync.Mutex
+	lanCache   = make(map[string]*LAN)
+	lanCacheMu sync.Mutex
 )
 
 // getLANCacheKey generates a cache key from IP and device ID
@@ -25,16 +26,16 @@ func getLANCacheKey(ip string, deviceID int) string {
 // This is a translation of Python's Device class from base_device.py
 type Device struct {
 	// Private fields (using lowercase naming convention in Go)
-	ip        string
-	port      int
-	id        int
+	ip         string
+	port       int
+	id         int
 	deviceType DeviceType
-	sn        *string
-	name      *string
-	version   *int
-	lan       *LAN
-	supported bool
-	online    bool
+	sn         *string
+	name       *string
+	version    *int
+	lan        *LAN
+	supported  bool
+	online     bool
 
 	// Pre-set token and key for V3 devices (to skip cloud authentication)
 	presetToken []byte
@@ -60,12 +61,12 @@ type DeviceOption func(*Device)
 // This is the equivalent of Python's __init__ method
 func NewDevice(ip string, port int, deviceID int, deviceType DeviceType, opts ...DeviceOption) *Device {
 	d := &Device{
-		ip:        ip,
-		port:      port,
-		id:        deviceID,
-		deviceType: deviceType,
-		supported: false,
-		online:    false,
+		ip:                           ip,
+		port:                         port,
+		id:                           deviceID,
+		deviceType:                   deviceType,
+		supported:                    false,
+		online:                       false,
 		supportedCapabilityOverrides: make(map[string]CapabilityOverrideInfo),
 	}
 
@@ -191,7 +192,7 @@ func (d *Device) SetSupported(supported bool) {
 // Refresh refreshes the device state
 // This is the equivalent of Python's async refresh method
 // Returns an error to indicate it must be implemented by subclasses
-func (d *Device) Refresh() error {
+func (d *Device) Refresh(context.Context) error {
 	return fmt.Errorf("not implemented")
 }
 

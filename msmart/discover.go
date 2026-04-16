@@ -623,11 +623,8 @@ func ConnectDevice(device *Device, config *DiscoverConfig) error {
 	}
 
 	// Attempt to refresh the device state
-	// Note: The Device.Refresh() method returns an error by default
-	// Subclasses should override it
-	if err := device.Refresh(); err != nil {
+	if err := device.Refresh(context.Background()); err != nil {
 		slog.Warn("Device refresh failed", "error", err)
-		// Don't return error as this is expected for base Device class
 	}
 
 	return nil

@@ -1504,35 +1504,10 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 		ac.needsRefresh = false
 	}
 
-	// Apply single-property updates if any
-	if len(ac.updatedProperties) > 0 {
-		properties := make(map[PropertyId]interface{})
-		for prop := range ac.updatedProperties {
-			// Get property value based on PropertyId
-			switch prop {
-			case PropertyIdSwingUdAngle:
-				properties[prop] = ac.verticalSwingAngle
-			case PropertyIdSwingLrAngle:
-				properties[prop] = ac.horizontalSwingAngle
-			case PropertyIdBuzzer:
-				properties[prop] = ac.beepOn
-			case PropertyIdBreezeless:
-				properties[prop] = ac.breezeMode == BreezeModeBreezeless
-			case PropertyIdBreezeAway:
-				properties[prop] = ac.breezeMode == BreezeModeBreezeAway
-			case PropertyIdRateSelect:
-				properties[prop] = ac.rateSelect
-			case PropertyIdFreshAir:
-				properties[prop] = true // TODO: add fresh air field
-			}
-		}
-
-		if err := ac.applyProperties(ctx, properties); err != nil {
-			return err
-		}
-
-		// Clear updated properties after successful apply
-		ac.updatedProperties = make(map[PropertyId]bool)
+	// If powerState is still nil after refresh, return error
+	// This prevents accidentally turning off the device
+	if ac.powerState == nil {
+		return fmt.Errorf("failed to get device power state, cannot apply changes safely")
 	}
 
 	// Build SetStateCommand for main state

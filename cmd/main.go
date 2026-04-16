@@ -16,7 +16,6 @@ import (
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 	"github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
-	"github.com/RelicOfTesla/midea-msmart/msmart/device/cc"
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 )
@@ -808,16 +807,41 @@ type Device interface {
 	GetPort() int
 }
 
-// mustGetACDevice extracts an AC device from interface{}, returns error if not AC type
-func mustGetACDevice(device interface{}) (*ac.AirConditioner, error) {
-	acDevice, ok := device.(*ac.AirConditioner)
-	if !ok {
-		return nil, fmt.Errorf("此命令只支持空调设备 (AC)，请使用 --device_type AC 指定空调设备")
-	}
-	return acDevice, nil
+// AirConditioner 接口 - main.go 中实际用到的方法
+// MVP 设计：只包含必要的方法，不包含所有方法
+type AirConditioner interface {
+	// 状态查询
+	PowerState() *bool
+	TargetTemperature() float64
+	IndoorTemperature() *float64
+	OutdoorTemperature() *float64
+	OperationalMode() ac.OperationalMode
+	FanSpeed() interface{}
+	SwingMode() ac.SwingMode
+	Eco() bool
+	Turbo() bool
+
+	// 控制设置
+	SetPowerState(bool)
+	SetTargetTemperature(float64)
+	SetOperationalMode(ac.OperationalMode)
+	SetFanSpeed(interface{})
+	SetSwingMode(ac.SwingMode)
+
+	// 操作
+	Refresh(ctx context.Context) error
+	Apply(ctx context.Context) error
+	GetCapabilities(ctx context.Context) error
+	CapabilitiesDict() map[string]interface{}
+
+	// 能耗
+	SetEnableEnergyUsageRequests(bool)
+	GetRealTimePowerUsage(format ac.EnergyDataFormat) *float64
+	GetCurrentEnergyUsage(format ac.EnergyDataFormat) *float64
+	GetTotalEnergyUsage(format ac.EnergyDataFormat) *float64
 }
 
-func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Device, interface{}, error) {
+func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Device, AirConditioner, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, nil, err
@@ -847,10 +871,8 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 	// Create device based on type
 	switch effectiveType {
 	case DeviceTypeCC:
-		// Create Commercial Air Conditioner
-		ccDevice := cc.NewCommercialAirConditioner(device.IP, int(deviceID), device.Port)
-		slog.Info("商业空调设备 (CC) 支持有限,部分命令可能不可用")
-		return device, ccDevice, nil
+		// Commercial Air Conditioner - not fully supported in MVP
+		return nil, nil, fmt.Errorf("商业空调设备 (CC) 尚未完全支持，请使用 AC 类型")
 	default:
 		// Create Air Conditioner (default)
 		acDevice := ac.NewAirConditioner(
@@ -920,7 +942,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 
 // getDeviceDirect creates a device directly with host, id, token and key
 // This is used when --id, --token, --key are provided (similar to Python CLI)
-func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceTypeStr string) (*config.Device, interface{}, error) {
+func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceTypeStr string) (*config.Device, AirConditioner, error) {
 	// Create a dummy config device for display purposes
 	device := &config.Device{
 		ID:      fmt.Sprintf("%d", deviceID),
@@ -940,10 +962,8 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 	// Create device based on type
 	switch effectiveType {
 	case DeviceTypeCC:
-		// Create Commercial Air Conditioner
-		ccDevice := cc.NewCommercialAirConditioner(host, deviceID, 6444)
-		slog.Info("商业空调设备 (CC) 支持有限,部分命令可能不可用")
-		return device, ccDevice, nil
+		// Commercial Air Conditioner - not fully supported in MVP
+		return nil, nil, fmt.Errorf("商业空调设备 (CC) 尚未完全支持，请使用 AC 类型")
 	default:
 		// Create Air Conditioner (default)
 		acDevice := ac.NewAirConditioner(
@@ -982,7 +1002,7 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 }
 
 // getDeviceAuto automatically discovers a device and gets token/key for V3 devices
-func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, interface{}, error) {
+func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, AirConditioner, error) {
 	slog.Debug("正在自动发现设备", "identifier", identifier)
 
 	// Create context with timeout
@@ -1099,10 +1119,8 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 	// Create device based on type
 	switch effectiveType {
 	case DeviceTypeCC:
-		// Create Commercial Air Conditioner
-		ccDevice := cc.NewCommercialAirConditioner(d.GetIP(), int(deviceID), d.GetPort())
-		slog.Info("商业空调设备 (CC) 支持有限,部分命令可能不可用")
-		return device, ccDevice, nil
+		// Commercial Air Conditioner - not fully supported in MVP
+		return nil, nil, fmt.Errorf("商业空调设备 (CC) 尚未完全支持，请使用 AC 类型")
 	default:
 		// Create Air Conditioner (default)
 		acDevice := ac.NewAirConditioner(
@@ -1181,31 +1199,25 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 
 func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Direct mode: if deviceID is provided, use direct connection
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
 		// Auto mode: discover device and get token/key automatically
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
 		// Normal mode: load from config
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device (currently only AC is fully supported)
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	// Print connection info
+// Print connection info
 	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
@@ -1253,7 +1265,7 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 	return nil
 }
 
-func printCapabilities(acDevice *ac.AirConditioner) {
+func printCapabilities(acDevice AirConditioner) {
 	// Get capabilities dictionary
 	caps := acDevice.CapabilitiesDict()
 
@@ -1286,7 +1298,7 @@ func printCapabilities(acDevice *ac.AirConditioner) {
 }
 
 // writeCapabilitiesToYAML writes device capabilities to a YAML file
-func writeCapabilitiesToYAML(acDevice *ac.AirConditioner, filename string) error {
+func writeCapabilitiesToYAML(acDevice AirConditioner, filename string) error {
 	// Get capabilities dictionary
 	caps := acDevice.CapabilitiesDict()
 	if caps == nil || len(caps) == 0 {
@@ -1307,7 +1319,7 @@ func writeCapabilitiesToYAML(acDevice *ac.AirConditioner, filename string) error
 	return nil
 }
 
-func printACState(acDevice *ac.AirConditioner) {
+func printACState(acDevice AirConditioner) {
 	// Get mode name
 	modeNames := map[ac.OperationalMode]string{
 		ac.OperationalModeCool:    "cool",
@@ -1348,7 +1360,7 @@ func printACState(acDevice *ac.AirConditioner) {
 	slog.Info("空调状态", "state", state)
 }
 
-func printEnergyUsage(acDevice *ac.AirConditioner) {
+func printEnergyUsage(acDevice AirConditioner) {
 	// Create energy usage struct
 	energy := EnergyUsage{
 		RealTimePower: acDevice.GetRealTimePowerUsage(ac.EnergyDataFormatBCD),
@@ -1362,29 +1374,23 @@ func printEnergyUsage(acDevice *ac.AirConditioner) {
 
 func handlePower(configPath string, flags *GlobalFlags, deviceTypeStr string, on bool, identifier string) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Direct mode: if deviceID is provided, use direct connection
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
+slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
 	// Create context with timeout to prevent hanging
@@ -1410,29 +1416,23 @@ func handlePower(configPath string, flags *GlobalFlags, deviceTypeStr string, on
 
 func handleTemp(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string, temp float64) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Direct mode: if deviceID is provided, use direct connection
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
+slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
 	// Create context with timeout to prevent hanging
@@ -1454,29 +1454,23 @@ func handleTemp(configPath string, flags *GlobalFlags, deviceTypeStr string, ide
 
 func handleMode(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string, mode ac.OperationalMode) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
+slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
 	// Create context with timeout to prevent hanging
@@ -1498,29 +1492,23 @@ func handleMode(configPath string, flags *GlobalFlags, deviceTypeStr string, ide
 
 func handleFan(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string, speed ac.FanSpeed) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
+slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
 	// Create context with timeout to prevent hanging
@@ -1542,29 +1530,23 @@ func handleFan(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 
 func handleSwing(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string, swing ac.SwingMode) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
+slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
 	// Create context with timeout to prevent hanging
@@ -1587,29 +1569,23 @@ func handleSwing(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 // handleSet handles the set command for multi-parameter control
 func handleSet(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	// Track changes
+// Track changes
 	var hasChanges bool
 	var changes []string
 
@@ -1700,29 +1676,23 @@ func handleSet(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 }
 func handleQuery(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string, key string) error {
 	var device *config.Device
-	var deviceObj interface{}
+	var acDevice AirConditioner
 	var err error
 
 	// Use direct connection if deviceID, token and key are provided
 	if flags.DeviceID > 0 {
-		device, deviceObj, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
+		device, acDevice, err = getDeviceDirect(identifier, flags.DeviceID, flags.DeviceToken, flags.DeviceKey, deviceTypeStr)
 	} else if flags.AutoMode {
-		device, deviceObj, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
+		device, acDevice, err = getDeviceAuto(identifier, configPath, deviceTypeStr)
 	} else {
-		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
+		device, acDevice, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Get AC device
-	acDevice, err := mustGetACDevice(deviceObj)
-	if err != nil {
-		slog.Error(err.Error())
-		return err
-	}
-
-	slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
+slog.Debug("目标设备", "name", device.Name, "ip", device.IP)
 	slog.Debug("正在连接...")
 
 	// Create context with timeout
@@ -1746,7 +1716,7 @@ func handleQuery(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 	return nil
 }
 
-func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
+func printSpecificAttribute(acDevice AirConditioner, key string) error {
 	switch strings.ToLower(key) {
 	case "temp", "temperature", "target_temp":
 		slog.Info("目标温度", "value", fmt.Sprintf("%.0f°C", acDevice.TargetTemperature()))
