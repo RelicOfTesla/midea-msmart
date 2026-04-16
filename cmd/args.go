@@ -203,10 +203,10 @@ func parseDiscoverArgs(args []string) (targetHost string, autoConnect bool, acco
 
 // parseBindArgs 解析 bind 命令参数
 func parseBindArgs(args []string) (identifier string, name string) {
-	if len(args) >= 2 {
-		identifier = args[1]
+	if len(args) >= 1 {
+		identifier = args[0]
 	}
-	for i := 2; i < len(args); i++ {
+	for i := 1; i < len(args); i++ {
 		if args[i] == "-n" && i+1 < len(args) {
 			name = args[i+1]
 			break
@@ -217,18 +217,18 @@ func parseBindArgs(args []string) (identifier string, name string) {
 
 // parseUnbindArgs 解析 unbind 命令参数
 func parseUnbindArgs(args []string) (identifier string) {
-	if len(args) >= 2 {
-		identifier = args[1]
+	if len(args) >= 1 {
+		identifier = args[0]
 	}
 	return
 }
 
 // parseStatusArgs 解析 status 命令参数
 func parseStatusArgs(args []string) (identifier string, autoMode bool, showCapabilities bool, capabilitiesFile string, showEnergy bool) {
-	if len(args) >= 2 {
-		identifier = args[1]
+	if len(args) >= 1 {
+		identifier = args[0]
 	}
-	for i := 2; i < len(args); i++ {
+	for i := 1; i < len(args); i++ {
 		switch args[i] {
 		case "--auto", "-a":
 			autoMode = true
@@ -247,93 +247,93 @@ func parseStatusArgs(args []string) (identifier string, autoMode bool, showCapab
 
 // parsePowerArgs 解析 on/off 命令参数
 func parsePowerArgs(args []string) (identifier string, autoMode bool) {
-	if len(args) >= 2 {
-		identifier = args[1]
+	if len(args) >= 1 {
+		identifier = args[0]
 	}
-	autoMode = FindBoolFlag(args[2:], "--auto")
+	autoMode = FindBoolFlag(args[1:], "--auto")
 	return
 }
 
 // parseTempArgs 解析 temp 命令参数
 func parseTempArgs(args []string) (identifier string, temp float64, autoMode bool, err error) {
-	if len(args) < 3 {
+	if len(args) < 2 {
 		PrintError("用法: midea temp <name|id> <温度> [--auto]")
 		err = fmt.Errorf("temp requires identifier and temperature")
 		return
 	}
-	identifier = args[1]
-	temp, err = ParseTemp(args[2])
+	identifier = args[0]
+	temp, err = ParseTemp(args[1])
 	if err != nil {
-		PrintError("无效的温度: %s (范围: 16-30°C)", args[2])
+		PrintError("无效的温度: %s (范围: 16-30°C)", args[1])
 		return
 	}
-	autoMode = FindBoolFlag(args[3:], "--auto")
+	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
 // parseModeArgs 解析 mode 命令参数
 func parseModeArgs(args []string) (identifier string, mode ac.OperationalMode, autoMode bool, err error) {
-	if len(args) < 3 {
+	if len(args) < 2 {
 		PrintError("用法: midea mode <name|id> <模式> [--auto]")
 		err = fmt.Errorf("mode requires identifier and mode value")
 		return
 	}
-	identifier = args[1]
-	mode, err = ParseMode(args[2])
+	identifier = args[0]
+	mode, err = ParseMode(args[1])
 	if err != nil {
-		PrintError("无效的模式: %s", args[2])
+		PrintError("无效的模式: %s", args[1])
 		return
 	}
-	autoMode = FindBoolFlag(args[3:], "--auto")
+	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
 // parseFanArgs 解析 fan 命令参数
 func parseFanArgs(args []string) (identifier string, speed ac.FanSpeed, autoMode bool, err error) {
-	if len(args) < 3 {
+	if len(args) < 2 {
 		PrintError("用法: midea fan <name|id> <风速> [--auto]")
 		err = fmt.Errorf("fan requires identifier and fan speed")
 		return
 	}
-	identifier = args[1]
-	speed, err = ParseFanSpeed(args[2])
+	identifier = args[0]
+	speed, err = ParseFanSpeed(args[1])
 	if err != nil {
-		PrintError("无效的风速: %s", args[2])
+		PrintError("无效的风速: %s", args[1])
 		return
 	}
-	autoMode = FindBoolFlag(args[3:], "--auto")
+	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
 // parseSwingArgs 解析 swing 命令参数
 func parseSwingArgs(args []string) (identifier string, swing ac.SwingMode, autoMode bool, err error) {
-	if len(args) < 3 {
+	if len(args) < 2 {
 		PrintError("用法: midea swing <name|id> <模式> [--auto]")
 		err = fmt.Errorf("swing requires identifier and swing mode")
 		return
 	}
-	identifier = args[1]
-	swing, err = ParseSwingMode(args[2])
+	identifier = args[0]
+	swing, err = ParseSwingMode(args[1])
 	if err != nil {
-		PrintError("无效的摆风模式: %s", args[2])
+		PrintError("无效的摆风模式: %s", args[1])
 		return
 	}
-	autoMode = FindBoolFlag(args[3:], "--auto")
+	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
 // parseSetArgs 解析 set 命令参数
 func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *float64, modeValue *ac.OperationalMode, speedValue *ac.FanSpeed, swingValue *ac.SwingMode, powerValue *bool, err error) {
-	if len(args) < 2 {
+	if len(args) < 1 {
 		PrintError("用法: midea set <name|id> [选项] [--auto]")
 		err = fmt.Errorf("set requires identifier")
 		return
 	}
-	identifier = args[1]
-	autoMode = FindBoolFlag(args[2:], "--auto")
+	identifier = args[0]
+	autoMode = FindBoolFlag(args[1:], "--auto")
 
 	// Parse --temp
-	if val, found := FindFlag(args[2:], "--temp"); found {
+	if val, found := FindFlag(args[1:], "--temp"); found {
 		temp, parseErr := ParseTemp(val)
 		if parseErr != nil {
 			PrintError("无效的温度: %s (范围: 16-30°C)", val)
@@ -344,7 +344,7 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 	}
 
 	// Parse --mode
-	if val, found := FindFlag(args[2:], "--mode"); found {
+	if val, found := FindFlag(args[1:], "--mode"); found {
 		mode, parseErr := ParseMode(val)
 		if parseErr != nil {
 			PrintError("无效的模式: %s", val)
@@ -355,7 +355,7 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 	}
 
 	// Parse --fan
-	if val, found := FindFlag(args[2:], "--fan"); found {
+	if val, found := FindFlag(args[1:], "--fan"); found {
 		speed, parseErr := ParseFanSpeed(val)
 		if parseErr != nil {
 			PrintError("无效的风速: %s", val)
@@ -366,7 +366,7 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 	}
 
 	// Parse --swing
-	if val, found := FindFlag(args[2:], "--swing"); found {
+	if val, found := FindFlag(args[1:], "--swing"); found {
 		swing, parseErr := ParseSwingMode(val)
 		if parseErr != nil {
 			PrintError("无效的摆风模式: %s", val)
@@ -377,7 +377,7 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 	}
 
 	// Parse --power
-	if val, found := FindFlag(args[2:], "--power"); found {
+	if val, found := FindFlag(args[1:], "--power"); found {
 		power := strings.ToLower(val)
 		if power != "on" && power != "off" {
 			PrintError("无效的电源状态: %s (应为 on 或 off)", val)
@@ -401,10 +401,10 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 // parseQueryArgs 解析 query 命令参数
 func parseQueryArgs(args []string) (identifier string, key string, showAll bool, autoMode bool) {
 	showAll = true
-	if len(args) >= 2 {
-		identifier = args[1]
+	if len(args) >= 1 {
+		identifier = args[0]
 	}
-	for i := 2; i < len(args); i++ {
+	for i := 1; i < len(args); i++ {
 		switch args[i] {
 		case "--auto", "-a":
 			autoMode = true

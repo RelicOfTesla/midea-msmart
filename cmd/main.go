@@ -57,7 +57,8 @@ func init() {
 
 func main() {
 	if err := run(); err != nil {
-		// Error already printed by the handler
+		// Print error if not already printed
+		fmt.Printf("❌ 错误: %v\n", err)
 		os.Exit(1)
 	}
 }
