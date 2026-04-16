@@ -3,6 +3,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -223,165 +224,197 @@ func parseUnbindArgs(args []string) (identifier string) {
 	return
 }
 
-// parseStatusArgs 解析 status 命令参数
+// parseStatusArgs 解析 status 命令参数（使用 flag.FlagSet）
 func parseStatusArgs(args []string) (identifier string, autoMode bool, showCapabilities bool, capabilitiesFile string, showEnergy bool) {
-	if len(args) >= 1 {
-		identifier = args[0]
-	}
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "--auto", "-a":
-			autoMode = true
-		case "--capabilities":
-			showCapabilities = true
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				capabilitiesFile = args[i+1]
-				i++
-			}
-		case "--energy":
-			showEnergy = true
-		}
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+	fs.BoolVar(&showCapabilities, "capabilities", false, "Show capabilities")
+	fs.StringVar(&capabilitiesFile, "capabilities-file", "", "Save capabilities to file")
+	fs.BoolVar(&showEnergy, "energy", false, "Show energy info")
+
+	// 解析参数，忽略错误（用户可能输入未知参数）
+	fs.Parse(args)
+
+	// 剩余的位置参数
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
 	}
 	return
 }
 
-// parsePowerArgs 解析 on/off 命令参数
+// parsePowerArgs 解析 on/off 命令参数（使用 flag.FlagSet）
 func parsePowerArgs(args []string) (identifier string, autoMode bool) {
-	if len(args) >= 1 {
-		identifier = args[0]
+	fs := flag.NewFlagSet("power", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs.Parse(args)
+
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
 	}
-	autoMode = FindBoolFlag(args[1:], "--auto")
 	return
 }
 
-// parseTempArgs 解析 temp 命令参数
+// parseTempArgs 解析 temp 命令参数（使用 flag.FlagSet）
 func parseTempArgs(args []string) (identifier string, temp float64, autoMode bool, err error) {
-	if len(args) < 2 {
+	fs := flag.NewFlagSet("temp", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs.Parse(args)
+
+	if fs.NArg() < 2 {
 		PrintError("用法: midea temp <name|id> <温度> [--auto]")
 		err = fmt.Errorf("temp requires identifier and temperature")
 		return
 	}
-	identifier = args[0]
-	temp, err = ParseTemp(args[1])
+
+	identifier = fs.Arg(0)
+	temp, err = ParseTemp(fs.Arg(1))
 	if err != nil {
-		PrintError("无效的温度: %s (范围: 16-30°C)", args[1])
+		PrintError("无效的温度: %s (范围: 16-30°C)", fs.Arg(1))
 		return
 	}
-	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
-// parseModeArgs 解析 mode 命令参数
+// parseModeArgs 解析 mode 命令参数（使用 flag.FlagSet）
 func parseModeArgs(args []string) (identifier string, mode ac.OperationalMode, autoMode bool, err error) {
-	if len(args) < 2 {
+	fs := flag.NewFlagSet("mode", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs.Parse(args)
+
+	if fs.NArg() < 2 {
 		PrintError("用法: midea mode <name|id> <模式> [--auto]")
 		err = fmt.Errorf("mode requires identifier and mode value")
 		return
 	}
-	identifier = args[0]
-	mode, err = ParseMode(args[1])
+
+	identifier = fs.Arg(0)
+	mode, err = ParseMode(fs.Arg(1))
 	if err != nil {
-		PrintError("无效的模式: %s", args[1])
+		PrintError("无效的模式: %s", fs.Arg(1))
 		return
 	}
-	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
-// parseFanArgs 解析 fan 命令参数
+// parseFanArgs 解析 fan 命令参数（使用 flag.FlagSet）
 func parseFanArgs(args []string) (identifier string, speed ac.FanSpeed, autoMode bool, err error) {
-	if len(args) < 2 {
+	fs := flag.NewFlagSet("fan", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs.Parse(args)
+
+	if fs.NArg() < 2 {
 		PrintError("用法: midea fan <name|id> <风速> [--auto]")
 		err = fmt.Errorf("fan requires identifier and fan speed")
 		return
 	}
-	identifier = args[0]
-	speed, err = ParseFanSpeed(args[1])
+
+	identifier = fs.Arg(0)
+	speed, err = ParseFanSpeed(fs.Arg(1))
 	if err != nil {
-		PrintError("无效的风速: %s", args[1])
+		PrintError("无效的风速: %s", fs.Arg(1))
 		return
 	}
-	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
-// parseSwingArgs 解析 swing 命令参数
+// parseSwingArgs 解析 swing 命令参数（使用 flag.FlagSet）
 func parseSwingArgs(args []string) (identifier string, swing ac.SwingMode, autoMode bool, err error) {
-	if len(args) < 2 {
+	fs := flag.NewFlagSet("swing", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs.Parse(args)
+
+	if fs.NArg() < 2 {
 		PrintError("用法: midea swing <name|id> <模式> [--auto]")
 		err = fmt.Errorf("swing requires identifier and swing mode")
 		return
 	}
-	identifier = args[0]
-	swing, err = ParseSwingMode(args[1])
+
+	identifier = fs.Arg(0)
+	swing, err = ParseSwingMode(fs.Arg(1))
 	if err != nil {
-		PrintError("无效的摆风模式: %s", args[1])
+		PrintError("无效的摆风模式: %s", fs.Arg(1))
 		return
 	}
-	autoMode = FindBoolFlag(args[2:], "--auto")
 	return
 }
 
-// parseSetArgs 解析 set 命令参数
+// parseSetArgs 解析 set 命令参数（使用 flag.FlagSet）
 func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *float64, modeValue *ac.OperationalMode, speedValue *ac.FanSpeed, swingValue *ac.SwingMode, powerValue *bool, err error) {
-	if len(args) < 1 {
+	var tempStr, modeStr, fanStr, swingStr, powerStr string
+
+	fs := flag.NewFlagSet("set", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+	fs.StringVar(&tempStr, "temp", "", "Temperature (16-30)")
+	fs.StringVar(&modeStr, "mode", "", "Mode (cool/heat/auto/dry/fan)")
+	fs.StringVar(&fanStr, "fan", "", "Fan speed (auto/low/medium/high/silent)")
+	fs.StringVar(&swingStr, "swing", "", "Swing mode (off/vertical/horizontal/both)")
+	fs.StringVar(&powerStr, "power", "", "Power state (on/off)")
+
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
 		PrintError("用法: midea set <name|id> [选项] [--auto]")
 		err = fmt.Errorf("set requires identifier")
 		return
 	}
-	identifier = args[0]
-	autoMode = FindBoolFlag(args[1:], "--auto")
 
-	// Parse --temp
-	if val, found := FindFlag(args[1:], "--temp"); found {
-		temp, parseErr := ParseTemp(val)
+	identifier = fs.Arg(0)
+
+	// Parse temp
+	if tempStr != "" {
+		temp, parseErr := ParseTemp(tempStr)
 		if parseErr != nil {
-			PrintError("无效的温度: %s (范围: 16-30°C)", val)
+			PrintError("无效的温度: %s (范围: 16-30°C)", tempStr)
 			err = parseErr
 			return
 		}
 		tempValue = &temp
 	}
 
-	// Parse --mode
-	if val, found := FindFlag(args[1:], "--mode"); found {
-		mode, parseErr := ParseMode(val)
+	// Parse mode
+	if modeStr != "" {
+		mode, parseErr := ParseMode(modeStr)
 		if parseErr != nil {
-			PrintError("无效的模式: %s", val)
+			PrintError("无效的模式: %s", modeStr)
 			err = parseErr
 			return
 		}
 		modeValue = &mode
 	}
 
-	// Parse --fan
-	if val, found := FindFlag(args[1:], "--fan"); found {
-		speed, parseErr := ParseFanSpeed(val)
+	// Parse fan
+	if fanStr != "" {
+		speed, parseErr := ParseFanSpeed(fanStr)
 		if parseErr != nil {
-			PrintError("无效的风速: %s", val)
+			PrintError("无效的风速: %s", fanStr)
 			err = parseErr
 			return
 		}
 		speedValue = &speed
 	}
 
-	// Parse --swing
-	if val, found := FindFlag(args[1:], "--swing"); found {
-		swing, parseErr := ParseSwingMode(val)
+	// Parse swing
+	if swingStr != "" {
+		swing, parseErr := ParseSwingMode(swingStr)
 		if parseErr != nil {
-			PrintError("无效的摆风模式: %s", val)
+			PrintError("无效的摆风模式: %s", swingStr)
 			err = parseErr
 			return
 		}
 		swingValue = &swing
 	}
 
-	// Parse --power
-	if val, found := FindFlag(args[1:], "--power"); found {
-		power := strings.ToLower(val)
+	// Parse power
+	if powerStr != "" {
+		power := strings.ToLower(powerStr)
 		if power != "on" && power != "off" {
-			PrintError("无效的电源状态: %s (应为 on 或 off)", val)
-			err = fmt.Errorf("invalid power state: %s", val)
+			PrintError("无效的电源状态: %s (应为 on 或 off)", powerStr)
+			err = fmt.Errorf("invalid power state: %s", powerStr)
 			return
 		}
 		isOn := power == "on"
@@ -398,24 +431,22 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 	return
 }
 
-// parseQueryArgs 解析 query 命令参数
+// parseQueryArgs 解析 query 命令参数（使用 flag.FlagSet）
 func parseQueryArgs(args []string) (identifier string, key string, showAll bool, autoMode bool) {
 	showAll = true
-	if len(args) >= 1 {
-		identifier = args[0]
+
+	fs := flag.NewFlagSet("query", flag.ContinueOnError)
+	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+	fs.BoolVar(&showAll, "all", true, "Show all properties")
+
+	fs.Parse(args)
+
+	if fs.NArg() > 0 {
+		identifier = fs.Arg(0)
 	}
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "--auto", "-a":
-			autoMode = true
-		case "--all":
-			showAll = true
-		default:
-			if !strings.HasPrefix(args[i], "-") && key == "" {
-				key = args[i]
-				showAll = false
-			}
-		}
+	if fs.NArg() > 1 {
+		key = fs.Arg(1)
+		showAll = false
 	}
 	return
 }
