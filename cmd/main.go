@@ -308,7 +308,7 @@ func setupFlags(flags *GlobalFlags) {
 
 // setupLogger 设置日志输出
 // 如果 jsonMode 为 true，日志输出为 JSON 格式到 stderr
-// 否则输出为文本格式到 stdout
+// 否则输出为格式化文本到 stdout
 func setupLogger(jsonMode bool) {
 	var handler slog.Handler
 	if jsonMode {
@@ -317,8 +317,8 @@ func setupLogger(jsonMode bool) {
 			Level: slog.LevelInfo,
 		})
 	} else {
-		// 文本格式输出到 stdout
-		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		// 格式化文本输出到 stdout（使用自定义 Handler）
+		handler = NewPrettyTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelInfo,
 		})
 	}
