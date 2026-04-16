@@ -5,6 +5,8 @@
 
 一个用于控制美的空调的命令行工具，支持局域网设备发现、状态查询、远程控制等功能。
 
+**⚠️ 这是有 AI vibe coding 的项目 - 由 AI 辅助开发和维护。**
+
 ## Supported Devices
 
 This library supports air conditioners from Midea and several associated brands that use the following Android apps or their iOS equivalents:
@@ -245,7 +247,6 @@ midea query <name|id> [key] [--all] [--auto]
 ```
 
 - `key`: 属性名称（如: temp, mode, fan, swing, power）
-- `--all`: 显示所有属性（默认）
 - `--auto`: 自动发现设备并获取 token
 
 ### 高级命令
@@ -354,15 +355,6 @@ midea temp 客厅 24
 0 23 * * * /usr/local/bin/midea off 客厅
 ```
 
-### 查询设备能力
-
-```bash
-# 查询设备能力并保存到文件
-midea status 客厅 --capabilities capabilities.yaml
-
-# 查看设备能力
-cat capabilities.yaml
-```
 
 ## 🔧 故障排除
 
@@ -374,8 +366,8 @@ cat capabilities.yaml
 
 ### V3 设备认证失败
 
-1. 尝试使用 `--auto-connect` / `--auto` 参数号和密码
-2. 确保使用正确的美的账
+1. 尝试使用 `--auto-connect` / `--auto` 参数
+2. 确保使用正确的美的账号和密码
 3. 确保设备已绑定到账号
 
 ### 连接超时
@@ -390,5 +382,4 @@ cat capabilities.yaml
 
 感谢以下项目和资源：
 - [msmart-ng](https://github.com/mill1000/midea-msmart) - 原始 Python 实现
-- [midea-ac-lib](https://github.com/regevbr/midea-ac-lib) - Midea AC 协议参考
 

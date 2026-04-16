@@ -63,11 +63,12 @@ func main() {
 }
 
 func run() error {
-	// 两阶段解析：先提取全局 flags，再传递给子命令
+	// 简化解析：使用 pflag 的 UnknownFlags 特性
 	// 这样可以支持乱序参数，如：midea -v status 客厅 -a 或 midea status -v 客厅 -a
 
-	// 创建全局 FlagSet（仅用于提取全局 flags 的值）
+	// 创建全局 FlagSet
 	globalFs := pflag.NewFlagSet("global", pflag.ContinueOnError)
+	globalFs.ParseErrorsWhitelist.UnknownFlags = true // 忽略未知参数
 	globalFs.StringVarP(&region, "region", "r", msmart.DefaultCloudRegion, "Cloud region (CN, US, EU)")
 	globalFs.StringVarP(&deviceType, "device_type", "d", "AC", "Device type (AC, CC)")
 	globalFs.IntVarP(&deviceID, "id", "i", 0, "Device ID for V3 devices")
@@ -75,73 +76,8 @@ func run() error {
 	globalFs.StringVarP(&deviceKey, "key", "k", "", "Auth key for V3 devices")
 	globalFs.BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 
-	// 第一阶段：扫描 os.Args，提取全局 flags 和 command
-	var globalFlagArgs []string
-	var remainingArgs []string
-	var command string
-
-	for i := 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		if strings.HasPrefix(arg, "-") {
-			// 这是一个 flag
-			// 检查是否是全局 flag
-			flagName := strings.TrimLeft(arg, "-")
-			// 处理 --flag=value 格式
-			if idx := strings.Index(flagName, "="); idx > 0 {
-				flagName = flagName[:idx]
-			}
-			// 处理短选项组合 -abc
-			if len(flagName) > 1 && !strings.HasPrefix(arg, "--") {
-				// 短选项组合，拆分检查
-				isGlobal := false
-				for _, ch := range flagName {
-					if globalFs.ShorthandLookup(string(ch)) != nil {
-						isGlobal = true
-						break
-					}
-				}
-				if isGlobal {
-					globalFlagArgs = append(globalFlagArgs, arg)
-				} else {
-					remainingArgs = append(remainingArgs, arg)
-				}
-			} else {
-				// 长选项或单个短选项
-				if globalFs.Lookup(flagName) != nil || globalFs.ShorthandLookup(flagName) != nil {
-					globalFlagArgs = append(globalFlagArgs, arg)
-					// 检查 flag 是否需要值
-					f := globalFs.Lookup(flagName)
-					if f == nil {
-						f = globalFs.ShorthandLookup(flagName)
-					}
-					if f != nil && f.Value.Type() != "bool" {
-						// 下一个参数是 flag 的值
-						if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
-							globalFlagArgs = append(globalFlagArgs, os.Args[i+1])
-							i++
-						}
-					}
-				} else {
-					remainingArgs = append(remainingArgs, arg)
-					// 检查是否是 --flag=value 格式
-					if !strings.Contains(arg, "=") && i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
-						// 下一个参数可能是 flag 的值，也保留
-						remainingArgs = append(remainingArgs, os.Args[i+1])
-						i++
-					}
-				}
-			}
-		} else {
-			// 非 flag 参数
-			if command == "" {
-				command = arg
-			}
-			remainingArgs = append(remainingArgs, arg)
-		}
-	}
-
-	// 解析全局 flags
-	globalFs.Parse(globalFlagArgs)
+	// 一次性解析所有参数（忽略未知参数）
+	globalFs.Parse(os.Args[1:])
 
 
 	if verbose {
@@ -156,13 +92,14 @@ func run() error {
 		return fmt.Errorf("unsupported device type: %s", deviceType)
 	}
 
-	args := remainingArgs
+	// 获取非 flag 参数（命令和位置参数）
+	args := globalFs.Args()
 	if len(args) < 1 {
 		printUsage()
 		return fmt.Errorf("no command provided")
 	}
 
-	command = args[0]
+	command := args[0]
 	configPath := config.DefaultConfigPath()
 
 	// Commands that don't need config
