@@ -62,7 +62,7 @@ midea discover 192.168.1.60
 # 发现设备并自动获取 V3 设备的 token
 midea discover --auto-connect
 
-# 使用美的账号密码发现设备
+# 使用美的账号密码发现设备(可选)
 midea discover --auto-connect --account your@email.com --password yourpass
 ```
 
@@ -420,7 +420,7 @@ midea temp 客厅 24
 
 ### V3 设备认证失败
 
-1. 尝试使用 `--auto-connect` / `--auto` 参数
+1. 尝试使用 `--auto` / `--auto-connect` 参数
 2. 确保使用正确的美的账号和密码
 3. 确保设备已绑定到账号
 
@@ -428,7 +428,7 @@ midea temp 客厅 24
 
 1. 检查设备是否在线
 2. 检查网络连接
-3. 尝试使用 `-v` 参数查看详细日志
+3. 尝试使用 `-v` 参数配合AI查看详细日志
 
 ## 🙏 致谢
 
