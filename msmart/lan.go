@@ -248,7 +248,7 @@ func (p *_LanProtocol) ReadQueue(timeout time.Duration) ([]byte, error) {
 			return nil, &ProtocolError{Message: "unknown item type in queue"}
 		}
 	case <-timer:
-		return nil, &ProtocolError{Message: "timeout waiting for data"}
+		return nil, &RpcTimeoutError{Message: "timeout waiting for data"}
 	}
 }
 
