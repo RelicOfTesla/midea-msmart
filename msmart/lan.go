@@ -301,7 +301,51 @@ const AuthenticationExpiration = 12 * time.Hour
 //
 // Sign: 32 bytes
 //
-//	32 byte SHA256 of header + unencrypted payload
+// _LanProtocolV3 implements V3 protocol for Midea LAN communication
+//
+// Packet Structure
+//
+//	+------------------ Packet ------------------+
+//	| Header (6B) | Encrypted Payload (variable) |
+//	+-------------+-------------------------------+
+//
+// Header (6 bytes):
+//
+//	+--------+--------+------+------+
+//	| 0x8370 | length | 0x20 | type |
+//	| (2B)   | (2B)   | (1B) | (1B) |
+//	+--------+--------+------+------+
+//
+//	- 0x8370: Magic bytes (constant)
+//	- length: Payload length (big endian)
+//	- 0x20: Magic byte (constant)
+//	- type: Packet type (encrypted=0x0B, handshake=0x0F)
+//
+// Request Payload (before encryption):
+//
+//	+----------+------+----------+-------+
+//	| packetID | data | randPad  | hash  |
+//	| (2B)     | (n)  | (0-15B)  | (32B) |
+//	+----------+------+----------+-------+
+//
+//	- packetID: Random packet ID (device returns 0)
+//	- data: Application data
+//	- randPad: Random padding (align to 16 bytes)
+//	- hash: SHA256(header + packetID + data + randPad)
+//
+// Response Payload (after decryption):
+//
+//	+----------+------+----------+-------+
+//	| packetID | data | pad      | hash  |
+//	| (2B)     | (n)  | (0-15B)  | (32B) |
+//	+----------+------+----------+-------+
+//
+//	- packetID: Device returns 0 (doesn't validate request ID)
+//	- data: Application data
+//	- pad: Padding bytes (value = pad length)
+//	- hash: SHA256(header + decrypted payload without hash)
+//
+// Encryption: AES-128-CBC with IV derived from access key
 //
 // Notes
 //
@@ -421,7 +465,10 @@ func (p *_LanProtocolV3) decodeEncryptedResponse(packet []byte) ([]byte, error) 
 		return nil, &ProtocolError{Message: "decrypted payload too short"}
 	}
 
-	return decryptedPayload[2 : len(decryptedPayload)-int(pad)], nil
+	// Extract actual payload (skip packetID and padding)
+	actualPayload := decryptedPayload[2 : len(decryptedPayload)-int(pad)]
+
+	return actualPayload, nil
 }
 
 // decodeHandshakeResponse decodes a handshake response packet

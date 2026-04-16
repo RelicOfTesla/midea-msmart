@@ -251,10 +251,7 @@ func NewCommand(frameType msmart.FrameType) *Command {
 // This is the Go equivalent of Python tobytes method.
 func (c *Command) ToBytes(data []byte) []byte {
 	// Append message ID to payload
-	// TODO Message ID in reference is just a random value
-	c.messageID++
-	messageID := c.messageID & 0xFF
-	payload := append(data, byte(messageID))
+	payload := append(data, byte(c.nextMessageID()))
 
 	// Append CRC
 	crc := msmart.CalculateCRC8(payload)

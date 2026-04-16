@@ -6,11 +6,23 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"sync"
 	"time"
 )
 
 // Logger for the package
 var deviceLogger = log.Default()
+
+// Global LAN cache to reuse authenticated connections
+var (
+	lanCache     = make(map[string]*LAN)
+	lanCacheMu   sync.Mutex
+)
+
+// getLANCacheKey generates a cache key from IP and device ID
+func getLANCacheKey(ip string, deviceID int) string {
+	return fmt.Sprintf("%s:%d", ip, deviceID)
+}
 
 // Device represents a base device
 // This is a translation of Python's Device class from base_device.py
@@ -54,10 +66,30 @@ func NewDevice(ip string, port int, deviceID int, deviceType DeviceType, opts ..
 		port:      port,
 		id:        deviceID,
 		deviceType: deviceType,
-		lan:       NewLAN(ip, port, int64(deviceID)),
 		supported: false,
 		online:    false,
 		supportedCapabilityOverrides: make(map[string]CapabilityOverrideInfo),
+	}
+
+	// Try to reuse cached LAN object
+	lanCacheMu.Lock()
+	cacheKey := getLANCacheKey(ip, deviceID)
+	if cachedLAN, exists := lanCache[cacheKey]; exists {
+		// Check if the cached LAN is still usable (has valid authentication)
+		if cachedLAN.IsAuthenticated() {
+			d.lan = cachedLAN
+			lanCacheMu.Unlock()
+		} else {
+			// Cached LAN is not usable, create new one
+			d.lan = NewLAN(ip, port, int64(deviceID))
+			lanCache[cacheKey] = d.lan
+			lanCacheMu.Unlock()
+		}
+	} else {
+		// No cached LAN, create new one
+		d.lan = NewLAN(ip, port, int64(deviceID))
+		lanCache[cacheKey] = d.lan
+		lanCacheMu.Unlock()
 	}
 
 	// Apply optional parameters
@@ -186,6 +218,11 @@ func (d *Device) Authenticate(token Token, key Key) error {
 		return err
 	}
 	return nil
+}
+
+// IsAuthenticated checks if the device is authenticated (for V3 devices)
+func (d *Device) IsAuthenticated() bool {
+	return d.lan != nil && d.lan.IsAuthenticated()
 }
 
 // SetMaxConnectionLifetime sets the maximum connection lifetime of the LAN protocol

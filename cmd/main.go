@@ -625,11 +625,17 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 			if err != nil {
 				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
-			fmt.Println("🔐 正在认证...")
-			if err := acDevice.Authenticate(token, key); err != nil {
-				return nil, nil, fmt.Errorf("认证失败: %w", err)
+			
+			// Check if already authenticated (reuse cached connection)
+			if acDevice.IsAuthenticated() {
+				fmt.Println("✅ 已认证，复用现有连接")
+			} else {
+				fmt.Println("🔐 正在认证...")
+				if err := acDevice.Authenticate(token, key); err != nil {
+					return nil, nil, fmt.Errorf("认证失败: %w", err)
+				}
+				fmt.Println("✅ 认证成功")
 			}
-			fmt.Println("✅ 认证成功")
 		}
 		return device, acDevice, nil
 	}
@@ -681,11 +687,17 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 			if err != nil {
 				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
-			fmt.Println("🔐 正在认证...")
-			if err := acDevice.Authenticate(token, key); err != nil {
-				return nil, nil, fmt.Errorf("认证失败: %w", err)
+			
+			// Check if already authenticated (reuse cached connection)
+			if acDevice.IsAuthenticated() {
+				fmt.Println("✅ 已认证，复用现有连接")
+			} else {
+				fmt.Println("🔐 正在认证...")
+				if err := acDevice.Authenticate(token, key); err != nil {
+					return nil, nil, fmt.Errorf("认证失败: %w", err)
+				}
+				fmt.Println("✅ 认证成功")
 			}
-			fmt.Println("✅ 认证成功")
 		}
 
 		return device, acDevice, nil
@@ -834,11 +846,17 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 			if err != nil {
 				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
-			fmt.Println("🔐 正在认证...")
-			if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
-				return nil, nil, fmt.Errorf("认证失败: %w", err)
+			
+			// Check if already authenticated (reuse cached connection)
+			if acDevice.IsAuthenticated() {
+				fmt.Println("✅ 已认证，复用现有连接")
+			} else {
+				fmt.Println("🔐 正在认证...")
+				if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
+					return nil, nil, fmt.Errorf("认证失败: %w", err)
+				}
+				fmt.Println("✅ 认证成功")
 			}
-			fmt.Println("✅ 认证成功")
 		}
 		return device, acDevice, nil
 	}
