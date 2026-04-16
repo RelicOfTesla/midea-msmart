@@ -13,3 +13,6 @@
 /*.md
 /main
 /cmd/*.backup
+/.vscode
+/config.json
+/midea.json

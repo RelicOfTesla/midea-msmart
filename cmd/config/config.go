@@ -10,30 +10,34 @@ import (
 
 // Device represents a saved device configuration.
 type Device struct {
-	ID      string `json:"id"`      // Device ID (decimal string)
-	Name    string `json:"name"`    // Alias name
-	IP      string `json:"ip"`      // IP address
-	Port    int    `json:"port"`    // Port number
-	SN      string `json:"sn"`      // Serial number
-	Type    int    `json:"type"`    // Device type (0xAC for AC)
-	Token   string `json:"token"`   // Authentication token (hex string)
-	Key     string `json:"key"`     // Authentication key (hex string)
-	Version int    `json:"version"` // Protocol version (2 or 3)
-	Online  bool   `json:"online"`  // Online status (from last discovery)
+	ID              string `json:"id"`                // Device ID (decimal string)
+	Name            string `json:"name"`              // Alias name
+	IP              string `json:"ip"`                // IP address
+	Port            int    `json:"port"`              // Port number
+	SN              string `json:"sn"`                // Serial number
+	Type            int    `json:"type"`              // Device type (0xAC for AC)
+	Token           string `json:"token"`             // Authentication token (hex string)
+	Key             string `json:"key"`               // Authentication key (hex string)
+	Version         int    `json:"version"`           // Protocol version (2 or 3)
+	Online          bool   `json:"online"`            // Online status (from last discovery)
+	LocalKey        string `json:"local_key,omitempty"`        // Local key for V3 devices (hex string)
+	LocalKeyExpire  string `json:"local_key_expire,omitempty"` // Local key expiration time (RFC3339)
 }
 
 // DeviceJSON is used for JSON unmarshaling with flexible type field.
 type DeviceJSON struct {
-	ID      string      `json:"id"`
-	Name    string      `json:"name"`
-	IP      string      `json:"ip"`
-	Port    int         `json:"port"`
-	SN      string      `json:"sn"`
-	Type    interface{} `json:"type"` // Can be string or number
-	Token   string      `json:"token"`
-	Key     string      `json:"key"`
-	Version int         `json:"version"`
-	Online  bool        `json:"online"`
+	ID              string      `json:"id"`
+	Name            string      `json:"name"`
+	IP              string      `json:"ip"`
+	Port            int         `json:"port"`
+	SN              string      `json:"sn"`
+	Type            interface{} `json:"type"` // Can be string or number
+	Token           string      `json:"token"`
+	Key             string      `json:"key"`
+	Version         int         `json:"version"`
+	Online          bool        `json:"online"`
+	LocalKey        string      `json:"local_key,omitempty"`
+	LocalKeyExpire  string      `json:"local_key_expire,omitempty"`
 }
 
 // parseType converts type field to int, handling both string and int formats.
@@ -137,16 +141,18 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{Devices: make([]Device, len(cfgJSON.Devices))}
 	for i, d := range cfgJSON.Devices {
 		cfg.Devices[i] = Device{
-			ID:      d.ID,
-			Name:    d.Name,
-			IP:      d.IP,
-			Port:    d.Port,
-			SN:      d.SN,
-			Type:    parseType(d.Type),
-			Token:   d.Token,
-			Key:     d.Key,
-			Version: d.Version,
-			Online:  d.Online,
+			ID:             d.ID,
+			Name:           d.Name,
+			IP:             d.IP,
+			Port:           d.Port,
+			SN:             d.SN,
+			Type:           parseType(d.Type),
+			Token:          d.Token,
+			Key:            d.Key,
+			Version:        d.Version,
+			Online:         d.Online,
+			LocalKey:       d.LocalKey,
+			LocalKeyExpire: d.LocalKeyExpire,
 		}
 	}
 

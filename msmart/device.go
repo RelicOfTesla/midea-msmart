@@ -221,6 +221,25 @@ func (d *Device) Authenticate(token Token, key Key) error {
 	return nil
 }
 
+// GetLocalKey returns the current local key and its expiration time
+// Returns nil if not authenticated or no local key is set
+func (d *Device) GetLocalKey() ([]byte, time.Time) {
+	if d.lan == nil {
+		return nil, time.Time{}
+	}
+	return d.lan.GetLocalKey()
+}
+
+// SetLocalKey sets the local key and expiration time directly
+// This allows reusing a cached local key without re-authenticating
+// Returns true if the key was set successfully, false if expired
+func (d *Device) SetLocalKey(localKey []byte, expiration time.Time) bool {
+	if d.lan == nil {
+		return false
+	}
+	return d.lan.SetLocalKey(localKey, expiration)
+}
+
 // IsAuthenticated checks if the device is authenticated (for V3 devices)
 func (d *Device) IsAuthenticated() bool {
 	return d.lan != nil && d.lan.IsAuthenticated()

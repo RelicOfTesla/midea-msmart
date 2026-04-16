@@ -748,6 +748,40 @@ func (l *LAN) IsAuthenticated() bool {
 	return l.protocolV3 != nil && l.protocolV3.Authenticated() && l.alive()
 }
 
+// GetLocalKey returns the current local key and its expiration time
+// Returns nil if not authenticated or no local key is set
+func (l *LAN) GetLocalKey() ([]byte, time.Time) {
+	if l.protocolV3 == nil {
+		return nil, time.Time{}
+	}
+	return l.protocolV3.localKey, l.protocolV3.localKeyExpiration
+}
+
+// SetLocalKey sets the local key and expiration time directly
+// This allows reusing a cached local key without re-authenticating
+// Returns true if the key was set successfully, false if expired
+func (l *LAN) SetLocalKey(localKey []byte, expiration time.Time) bool {
+	if expiration.IsZero() || time.Now().UTC().After(expiration) {
+		return false
+	}
+	
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	
+	// Create V3 protocol if not exists
+	if l.protocolV3 == nil {
+		l.protocolVersion = 3
+		l.protocolV3 = NewLanProtocolV3()
+		l.protocol = l.protocolV3
+	}
+	
+	// Set the local key and expiration
+	l.protocolV3.localKey = localKey
+	l.protocolV3.localKeyExpiration = expiration
+	
+	return true
+}
+
 // MaxConnectionLifetime returns the maximum connection lifetime in seconds
 func (l *LAN) MaxConnectionLifetime() *int {
 	if l.maxConnectionLifetime == nil {

@@ -642,11 +642,38 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 			if acDevice.IsAuthenticated() {
 				fmt.Println("✅ 已认证，复用现有连接")
 			} else {
-				fmt.Println("🔐 正在认证...")
-				if err := acDevice.Authenticate(token, key); err != nil {
-					return nil, nil, fmt.Errorf("认证失败: %w", err)
+				// Try to use cached localKey if available and not expired
+				localKeyValid := false
+				if device.LocalKey != "" && device.LocalKeyExpire != "" {
+					localKeyBytes, err := hex.DecodeString(device.LocalKey)
+					if err == nil {
+						expiration, err := time.Parse(time.RFC3339, device.LocalKeyExpire)
+						if err == nil && acDevice.SetLocalKey(localKeyBytes, expiration) {
+							fmt.Println("✅ 使用缓存的 LocalKey 已认证")
+							localKeyValid = true
+						}
+					}
 				}
-				fmt.Println("✅ 认证成功")
+
+				// If localKey is valid, skip normal authentication
+				if localKeyValid {
+					// Skip authentication, connection will be established when needed
+				} else {
+					fmt.Println("🔐 正在认证...")
+					if err := acDevice.Authenticate(token, key); err != nil {
+						return nil, nil, fmt.Errorf("认证失败: %w", err)
+					}
+					fmt.Println("✅ 认证成功")
+
+					// Save localKey to config after successful authentication
+					if localKey, expiration := acDevice.GetLocalKey(); localKey != nil {
+						device.LocalKey = hex.EncodeToString(localKey)
+						device.LocalKeyExpire = expiration.Format(time.RFC3339)
+						if err := cfg.Save(configPath); err != nil {
+							fmt.Printf("⚠️  保存 LocalKey 失败: %v\n", err)
+						}
+					}
+				}
 			}
 		}
 		return device, acDevice, nil
@@ -862,12 +889,52 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
 				fmt.Println("✅ 已认证，复用现有连接")
+
+				// Save localKey to config (may have been updated by cached LAN)
+				localKey, expiration := acDevice.GetLocalKey()
+				if localKey != nil {
+					// Update device in config, not the local variable
+					device.LocalKey = hex.EncodeToString(localKey)
+					device.LocalKeyExpire = expiration.Format(time.RFC3339)
+					
+					// Must update device in cfg.Devices, because AddDevice created a copy
+					for i, d := range cfg.Devices {
+						if d.ID == device.ID {
+							cfg.Devices[i].LocalKey = device.LocalKey
+							cfg.Devices[i].LocalKeyExpire = device.LocalKeyExpire
+							break
+						}
+					}
+					
+					if err := cfg.Save(configPath); err != nil {
+						fmt.Printf("⚠️  保存 LocalKey 失败: %v\n", err)
+					}
+				}
 			} else {
 				fmt.Println("🔐 正在认证...")
 				if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
 					return nil, nil, fmt.Errorf("认证失败: %w", err)
 				}
 				fmt.Println("✅ 认证成功")
+
+				// Save localKey to config after successful authentication
+				if localKey, expiration := acDevice.GetLocalKey(); localKey != nil {
+					device.LocalKey = hex.EncodeToString(localKey)
+					device.LocalKeyExpire = expiration.Format(time.RFC3339)
+					
+					// Must update device in cfg.Devices, because AddDevice created a copy
+					for i, d := range cfg.Devices {
+						if d.ID == device.ID {
+							cfg.Devices[i].LocalKey = device.LocalKey
+							cfg.Devices[i].LocalKeyExpire = device.LocalKeyExpire
+							break
+						}
+					}
+					
+					if err := cfg.Save(configPath); err != nil {
+						fmt.Printf("⚠️  保存 LocalKey 失败: %v\n", err)
+					}
+				}
 			}
 		}
 		return device, acDevice, nil
