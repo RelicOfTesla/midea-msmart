@@ -974,20 +974,22 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Get capabilities first
-	if err := acDevice.GetCapabilities(ctx); err != nil {
-		fmt.Printf("⚠️  获取设备能力失败: %v\n", err)
-	} else if flags.ShowCapabilities {
-		// If a file path is specified, write to file
-		if flags.CapabilitiesFile != "" {
-			if err := writeCapabilitiesToYAML(acDevice, flags.CapabilitiesFile); err != nil {
-				fmt.Printf("❌ 写入能力信息到文件失败: %v\n", err)
-			} else {
-				fmt.Printf("✅ 设备能力已写入: %s\n", flags.CapabilitiesFile)
-			}
+	// Get capabilities if requested
+	if flags.ShowCapabilities || flags.CapabilitiesFile != "" {
+		if err := acDevice.GetCapabilities(ctx); err != nil {
+			fmt.Printf("⚠️  获取设备能力失败: %v\n", err)
 		} else {
-			// Display capabilities to screen
-			printCapabilities(acDevice)
+			// If a file path is specified, write to file
+			if flags.CapabilitiesFile != "" {
+				if err := writeCapabilitiesToYAML(acDevice, flags.CapabilitiesFile); err != nil {
+					fmt.Printf("❌ 写入能力信息到文件失败: %v\n", err)
+				} else {
+					fmt.Printf("✅ 设备能力已写入: %s\n", flags.CapabilitiesFile)
+				}
+			} else {
+				// Display capabilities to screen
+				printCapabilities(acDevice)
+			}
 		}
 	}
 
