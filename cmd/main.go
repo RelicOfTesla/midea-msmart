@@ -137,27 +137,53 @@ func run() error {
 	case "list":
 		return handleList(configPath)
 	case "bind":
-		return handleBind(configPath)
+		identifier, name := parseBindArgs(os.Args[2:])
+		return handleBind(configPath, identifier, name)
 	case "unbind":
-		return handleUnbind(configPath)
+		identifier := parseUnbindArgs(os.Args[2:])
+		return handleUnbind(configPath, identifier)
 	case "status":
-		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy := parseStatusArgs(os.Args[2:])
+		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy)
 	case "on":
-		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, autoMode := parsePowerArgs(os.Args[2:])
+		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
 	case "off":
-		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, autoMode := parsePowerArgs(os.Args[2:])
+		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
 	case "temp":
-		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, temp, autoMode, err := parseTempArgs(os.Args[2:])
+		if err != nil {
+			return err
+		}
+		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, temp, autoMode)
 	case "mode":
-		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, mode, autoMode, err := parseModeArgs(os.Args[2:])
+		if err != nil {
+			return err
+		}
+		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, mode, autoMode)
 	case "fan":
-		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, speed, autoMode, err := parseFanArgs(os.Args[2:])
+		if err != nil {
+			return err
+		}
+		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, speed, autoMode)
 	case "swing":
-		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, swing, autoMode, err := parseSwingArgs(os.Args[2:])
+		if err != nil {
+			return err
+		}
+		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, swing, autoMode)
 	case "set":
-		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, autoMode, temp, mode, fanSpeed, swingMode, power, err := parseSetArgs(os.Args[2:])
+		if err != nil {
+			return err
+		}
+		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, temp, mode, fanSpeed, swingMode, power)
 	case "query":
-		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey)
+		identifier, key, showAll, autoMode := parseQueryArgs(os.Args[2:])
+		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, key, showAll, autoMode)
 	case "download":
 		return handleDownload(configPath, region)
 	default:
@@ -474,23 +500,7 @@ func handleList(configPath string) error {
 // Device Management Commands
 // ============================================================================
 
-func handleBind(configPath string) error {
-	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea bind <id|sn|ip> -n <名称>")
-		return fmt.Errorf("insufficient arguments for bind command")
-	}
-
-	identifier := os.Args[2]
-	name := ""
-
-	// Parse -n flag
-	for i := 3; i < len(os.Args); i++ {
-		if os.Args[i] == "-n" && i+1 < len(os.Args) {
-			name = os.Args[i+1]
-			break
-		}
-	}
-
+func handleBind(configPath string, identifier string, name string) error {
 	if name == "" {
 		fmt.Println("❌ 请指定名称: midea bind <id|sn|ip> -n <名称>")
 		return fmt.Errorf("name not specified for bind command")
@@ -517,13 +527,11 @@ func handleBind(configPath string) error {
 	return nil
 }
 
-func handleUnbind(configPath string) error {
-	if len(os.Args) < 3 {
+func handleUnbind(configPath string, identifier string) error {
+	if identifier == "" {
 		fmt.Println("❌ 用法: midea unbind <name|id>")
 		return fmt.Errorf("insufficient arguments for unbind command")
 	}
-
-	identifier := os.Args[2]
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -862,36 +870,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 	}
 }
 
-func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea status <name|id> [--auto] [--capabilities] [--energy]")
-		fmt.Println("   或者: midea status <host> --id <device-id> --token <token> --key <key>")
-		return fmt.Errorf("insufficient arguments for status command")
-	}
-
-	// Parse --auto, --capabilities and --energy flags
-	autoMode := false
-	showCapabilities := false
-	var capabilitiesFile string // Empty string means display to screen only
-	showEnergy := false
-	identifier := os.Args[2]
-	for i := 3; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-		}
-		if os.Args[i] == "--capabilities" {
-			showCapabilities = true
-			// Check if next argument is a file path (not starting with --)
-			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
-				capabilitiesFile = os.Args[i+1]
-				i++ // Skip next argument
-			}
-		}
-		if os.Args[i] == "--energy" {
-			showEnergy = true
-		}
-	}
-
+func handleStatus(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, autoMode bool, showCapabilities bool, capabilitiesFile string, showEnergy bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1137,26 +1116,7 @@ func printEnergyUsage(acDevice *ac.AirConditioner) {
 	fmt.Println("╚════════════════════════════════════════╝")
 }
 
-func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 3 {
-		action := "on"
-		if !on {
-			action = "off"
-		}
-		fmt.Printf("❌ 用法: midea %s <name|id> [--auto]\n", action)
-		fmt.Println("   或者: midea %s <host> --id <device-id> --token <token> --key <key>")
-		return fmt.Errorf("insufficient arguments for %s command", action)
-	}
-
-	// Parse --auto flag
-	autoMode := false
-	identifier := os.Args[2]
-	for i := 3; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-		}
-	}
-
+func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, autoMode bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1204,24 +1164,7 @@ func handlePower(configPath string, on bool, deviceTypeStr string, deviceID int,
 	return nil
 }
 
-func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea temp <name|id> <温度> [--auto]")
-		fmt.Println("   或者: midea temp <host> <温度> --id <device-id> --token <token> --key <key>")
-		fmt.Println("   温度范围: 16-30°C")
-		return fmt.Errorf("insufficient arguments for temp command")
-	}
-
-	// Parse --auto flag
-	autoMode := false
-	identifier := os.Args[2]
-	tempArg := os.Args[3]
-	for i := 4; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-		}
-	}
-
+func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, temp float64, autoMode bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1245,19 +1188,6 @@ func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceTok
 		return err
 	}
 
-	temp, err := strconv.ParseFloat(tempArg, 64)
-	if err != nil {
-		fmt.Println("❌ 无效的温度值")
-		fmt.Println("   温度范围: 16-30°C")
-		return fmt.Errorf("invalid temperature value: %s", tempArg)
-	}
-
-	if temp < 16 || temp > 30 {
-		fmt.Println("❌ 温度超出范围")
-		fmt.Println("   温度范围: 16-30°C")
-		return fmt.Errorf("temperature out of range: %.0f (valid range: 16-30°C)", temp)
-	}
-
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
 	fmt.Println("🔌 正在连接...")
 
@@ -1278,23 +1208,7 @@ func handleTemp(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	return nil
 }
 
-func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea mode <name|id> <模式> [--auto]")
-		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
-		return fmt.Errorf("insufficient arguments for mode command")
-	}
-
-	// Parse --auto flag
-	autoMode := false
-	identifier := os.Args[2]
-	modeArg := os.Args[3]
-	for i := 4; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-		}
-	}
-
+func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, mode ac.OperationalMode, autoMode bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1316,22 +1230,6 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	if err != nil {
 		fmt.Println("❌ " + err.Error())
 		return err
-	}
-
-	// Map mode string to OperationalMode
-	modeMap := map[string]ac.OperationalMode{
-		"cool": ac.OperationalModeCool,
-		"heat": ac.OperationalModeHeat,
-		"auto": ac.OperationalModeAuto,
-		"dry":  ac.OperationalModeDry,
-		"fan":  ac.OperationalModeFanOnly,
-	}
-
-	mode, ok := modeMap[modeArg]
-	if !ok {
-		fmt.Printf("❌ 未知模式: %s\n", modeArg)
-		fmt.Println("   模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)")
-		return fmt.Errorf("unknown mode: %s", modeArg)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1361,23 +1259,7 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 	return nil
 }
 
-func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea fan <name|id> <风速> [--auto]")
-		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
-		return fmt.Errorf("insufficient arguments for fan command")
-	}
-
-	// Parse --auto flag
-	autoMode := false
-	identifier := os.Args[2]
-	speedStr := os.Args[3]
-	for i := 4; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-		}
-	}
-
+func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, speed ac.FanSpeed, autoMode bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1399,22 +1281,6 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	if err != nil {
 		fmt.Println("❌ " + err.Error())
 		return err
-	}
-
-	// Map speed string to FanSpeed
-	speedMap := map[string]ac.FanSpeed{
-		"auto":   ac.FanSpeedAuto,
-		"low":    ac.FanSpeedLow,
-		"medium": ac.FanSpeedMedium,
-		"high":   ac.FanSpeedHigh,
-		"silent": ac.FanSpeedSilent,
-	}
-
-	speed, ok := speedMap[speedStr]
-	if !ok {
-		fmt.Printf("❌ 未知风速: %s\n", speedStr)
-		fmt.Println("   风速: auto(自动), low(低), medium(中), high(高), silent(静音)")
-		return fmt.Errorf("unknown fan speed: %s", speedStr)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1433,34 +1299,11 @@ func handleFan(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		return err
 	}
 
-	speedNames := map[ac.FanSpeed]string{
-		ac.FanSpeedAuto:   "自动",
-		ac.FanSpeedLow:    "低",
-		ac.FanSpeedMedium: "中",
-		ac.FanSpeedHigh:   "高",
-		ac.FanSpeedSilent: "静音",
-	}
-	fmt.Printf("✅ %s 风速已设置为 %s\n", device.Name, speedNames[speed])
+	fmt.Printf("✅ %s 风速已设置为 %s\n", device.Name, SpeedNames[speed])
 	return nil
 }
 
-func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 4 {
-		fmt.Println("❌ 用法: midea swing <name|id> <模式> [--auto]")
-		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
-		return fmt.Errorf("insufficient arguments for swing command")
-	}
-
-	// Parse --auto flag
-	autoMode := false
-	identifier := os.Args[2]
-	swingStr := os.Args[3]
-	for i := 4; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-		}
-	}
-
+func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, swing ac.SwingMode, autoMode bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1482,21 +1325,6 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	if err != nil {
 		fmt.Println("❌ " + err.Error())
 		return err
-	}
-
-	// Map swing string to SwingMode
-	swingMap := map[string]ac.SwingMode{
-		"off":        ac.SwingModeOff,
-		"vertical":   ac.SwingModeVertical,
-		"horizontal": ac.SwingModeHorizontal,
-		"both":       ac.SwingModeBoth,
-	}
-
-	swingMode, ok := swingMap[swingStr]
-	if !ok {
-		fmt.Printf("❌ 未知摆风模式: %s\n", swingStr)
-		fmt.Println("   模式: off(关闭), vertical(上下), horizontal(左右), both(全方位)")
-		return fmt.Errorf("unknown swing mode: %s", swingStr)
 	}
 
 	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
@@ -1507,7 +1335,7 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 	defer cancel()
 
 	// Set swing mode
-	acDevice.SetSwingMode(swingMode)
+	acDevice.SetSwingMode(swing)
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
@@ -1515,43 +1343,12 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 		return err
 	}
 
-	swingNames := map[ac.SwingMode]string{
-		ac.SwingModeOff:        "关闭",
-		ac.SwingModeVertical:   "上下摆风",
-		ac.SwingModeHorizontal: "左右摆风",
-		ac.SwingModeBoth:       "全方位摆风",
-	}
-	fmt.Printf("✅ %s 摆风已设置为 %s\n", device.Name, swingNames[swingMode])
+	fmt.Printf("✅ %s 摆风已设置为 %s\n", device.Name, SwingNames[swing])
 	return nil
 }
 
 // handleSet handles the set command for multi-parameter control
-func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea set <name|id> [选项] [--auto]")
-		fmt.Println("   选项:")
-		fmt.Println("     --temp <温度>      设置温度 (16-30°C)")
-		fmt.Println("     --mode <模式>      设置模式 (cool/heat/auto/dry/fan)")
-		fmt.Println("     --fan <风速>       设置风速 (auto/low/medium/high/silent)")
-		fmt.Println("     --swing <模式>     设置摆风 (off/vertical/horizontal/both)")
-		fmt.Println("     --power <on|off>   设置电源")
-		fmt.Println("")
-		fmt.Println("   示例:")
-		fmt.Println("     midea set 客厅 --temp 26 --mode cool --fan high")
-		fmt.Println("     midea set 客厅 --power on --temp 24")
-		return fmt.Errorf("insufficient arguments for set command")
-	}
-
-	// Parse --auto flag
-	autoMode := false
-	identifier := os.Args[2]
-	for i := 3; i < len(os.Args); i++ {
-		if os.Args[i] == "--auto" || os.Args[i] == "-a" {
-			autoMode = true
-			break
-		}
-	}
-
+func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, autoMode bool, temp *float64, mode *ac.OperationalMode, fanSpeed *ac.FanSpeed, swingMode *ac.SwingMode, power *bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1575,132 +1372,67 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 		return err
 	}
 
-	// Parse flags
+	// Track changes
 	var hasChanges bool
 	var changes []string
 
-	for i := 3; i < len(os.Args); i++ {
-		switch os.Args[i] {
-		case "--temp":
-			if i+1 >= len(os.Args) {
-				fmt.Println("❌ --temp 需要指定温度")
-				return fmt.Errorf("--temp requires a temperature value")
-			}
-			temp, err := strconv.ParseFloat(os.Args[i+1], 64)
-			if err != nil || temp < 16 || temp > 30 {
-				fmt.Printf("❌ 无效的温度: %s (范围: 16-30°C)\n", os.Args[i+1])
-				return fmt.Errorf("invalid temperature: %s", os.Args[i+1])
-			}
-			acDevice.SetTargetTemperature(temp)
-			changes = append(changes, fmt.Sprintf("温度 %.0f°C", temp))
-			hasChanges = true
-			i++
+	// Apply temperature if specified
+	if temp != nil {
+		acDevice.SetTargetTemperature(*temp)
+		changes = append(changes, fmt.Sprintf("温度 %.0f°C", *temp))
+		hasChanges = true
+	}
 
-		case "--mode":
-			if i+1 >= len(os.Args) {
-				fmt.Println("❌ --mode 需要指定模式")
-				return fmt.Errorf("--mode requires a mode value")
-			}
-			modeMap := map[string]ac.OperationalMode{
-				"cool": ac.OperationalModeCool,
-				"heat": ac.OperationalModeHeat,
-				"auto": ac.OperationalModeAuto,
-				"dry":  ac.OperationalModeDry,
-				"fan":  ac.OperationalModeFanOnly,
-			}
-			mode, ok := modeMap[os.Args[i+1]]
-			if !ok {
-				fmt.Printf("❌ 无效的模式: %s\n", os.Args[i+1])
-				return fmt.Errorf("invalid mode: %s", os.Args[i+1])
-			}
-			acDevice.SetOperationalMode(mode)
-			modeNames := map[ac.OperationalMode]string{
-				ac.OperationalModeCool:    "制冷",
-				ac.OperationalModeHeat:    "制热",
-				ac.OperationalModeAuto:    "自动",
-				ac.OperationalModeDry:     "除湿",
-				ac.OperationalModeFanOnly: "送风",
-			}
-			changes = append(changes, fmt.Sprintf("模式 %s", modeNames[mode]))
-			hasChanges = true
-			i++
-
-		case "--fan":
-			if i+1 >= len(os.Args) {
-				fmt.Println("❌ --fan 需要指定风速")
-				return fmt.Errorf("--fan requires a fan speed value")
-			}
-			speedMap := map[string]ac.FanSpeed{
-				"auto":   ac.FanSpeedAuto,
-				"low":    ac.FanSpeedLow,
-				"medium": ac.FanSpeedMedium,
-				"high":   ac.FanSpeedHigh,
-				"silent": ac.FanSpeedSilent,
-			}
-			speed, ok := speedMap[os.Args[i+1]]
-			if !ok {
-				fmt.Printf("❌ 无效的风速: %s\n", os.Args[i+1])
-				return fmt.Errorf("invalid fan speed: %s", os.Args[i+1])
-			}
-			acDevice.SetFanSpeed(speed)
-			fanNames := map[ac.FanSpeed]string{
-				ac.FanSpeedAuto:   "自动",
-				ac.FanSpeedLow:    "低",
-				ac.FanSpeedMedium: "中",
-				ac.FanSpeedHigh:   "高",
-				ac.FanSpeedSilent: "静音",
-			}
-			changes = append(changes, fmt.Sprintf("风速 %s", fanNames[speed]))
-			hasChanges = true
-			i++
-
-		case "--swing":
-			if i+1 >= len(os.Args) {
-				fmt.Println("❌ --swing 需要指定摆风模式")
-				return fmt.Errorf("--swing requires a swing mode value")
-			}
-			swingMap := map[string]ac.SwingMode{
-				"off":        ac.SwingModeOff,
-				"vertical":   ac.SwingModeVertical,
-				"horizontal": ac.SwingModeHorizontal,
-				"both":       ac.SwingModeBoth,
-			}
-			swing, ok := swingMap[os.Args[i+1]]
-			if !ok {
-				fmt.Printf("❌ 无效的摆风模式: %s\n", os.Args[i+1])
-				return fmt.Errorf("invalid swing mode: %s", os.Args[i+1])
-			}
-			acDevice.SetSwingMode(swing)
-			swingNames := map[ac.SwingMode]string{
-				ac.SwingModeOff:        "关闭",
-				ac.SwingModeVertical:   "上下摆风",
-				ac.SwingModeHorizontal: "左右摆风",
-				ac.SwingModeBoth:       "全方位摆风",
-			}
-			changes = append(changes, fmt.Sprintf("摆风 %s", swingNames[swing]))
-			hasChanges = true
-			i++
-
-		case "--power":
-			if i+1 >= len(os.Args) {
-				fmt.Println("❌ --power 需要指定 on 或 off")
-				return fmt.Errorf("--power requires on or off value")
-			}
-			power := os.Args[i+1]
-			if power != "on" && power != "off" {
-				fmt.Printf("❌ 无效的电源状态: %s (应为 on 或 off)\n", power)
-				return fmt.Errorf("invalid power state: %s", power)
-			}
-			isOn := power == "on"
-			acDevice.SetPowerState(isOn)
-			if isOn {
-				changes = append(changes, "开机")
-			} else {
-				changes = append(changes, "关机")
-			}
-			hasChanges = true
-			i++
+	// Apply mode if specified
+	if mode != nil {
+		acDevice.SetOperationalMode(*mode)
+		modeNames := map[ac.OperationalMode]string{
+			ac.OperationalModeCool:    "制冷",
+			ac.OperationalModeHeat:    "制热",
+			ac.OperationalModeAuto:    "自动",
+			ac.OperationalModeDry:     "除湿",
+			ac.OperationalModeFanOnly: "送风",
 		}
+		changes = append(changes, fmt.Sprintf("模式 %s", modeNames[*mode]))
+		hasChanges = true
+	}
+
+	// Apply fan speed if specified
+	if fanSpeed != nil {
+		acDevice.SetFanSpeed(*fanSpeed)
+		fanNames := map[ac.FanSpeed]string{
+			ac.FanSpeedAuto:   "自动",
+			ac.FanSpeedLow:    "低",
+			ac.FanSpeedMedium: "中",
+			ac.FanSpeedHigh:   "高",
+			ac.FanSpeedSilent: "静音",
+		}
+		changes = append(changes, fmt.Sprintf("风速 %s", fanNames[*fanSpeed]))
+		hasChanges = true
+	}
+
+	// Apply swing mode if specified
+	if swingMode != nil {
+		acDevice.SetSwingMode(*swingMode)
+		swingNames := map[ac.SwingMode]string{
+			ac.SwingModeOff:        "关闭",
+			ac.SwingModeVertical:   "上下摆风",
+			ac.SwingModeHorizontal: "左右摆风",
+			ac.SwingModeBoth:       "全方位摆风",
+		}
+		changes = append(changes, fmt.Sprintf("摆风 %s", swingNames[*swingMode]))
+		hasChanges = true
+	}
+
+	// Apply power state if specified
+	if power != nil {
+		acDevice.SetPowerState(*power)
+		if *power {
+			changes = append(changes, "开机")
+		} else {
+			changes = append(changes, "关机")
+		}
+		hasChanges = true
 	}
 
 	if !hasChanges {
@@ -1724,42 +1456,7 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	fmt.Printf("✅ %s 已设置: %s\n", device.Name, strings.Join(changes, ", "))
 	return nil
 }
-
-// handleQuery handles the query command for querying device properties
-func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string) error {
-	if len(os.Args) < 3 {
-		fmt.Println("❌ 用法: midea query <name|id> [key] [--all] [--auto]")
-		fmt.Println("   key: 属性名称 (如: temp, mode, fan, swing, power)")
-		fmt.Println("   --all: 显示所有属性 (默认)")
-		fmt.Println("   --auto: 自动发现设备并获取token")
-		fmt.Println("")
-		fmt.Println("   示例:")
-		fmt.Println("     midea query 客厅              # 显示所有属性")
-		fmt.Println("     midea query 客厅 temp         # 只显示温度")
-		fmt.Println("     midea query 客厅 --auto       # 自动发现设备")
-		return fmt.Errorf("insufficient arguments for query command")
-	}
-
-	// Parse flags and arguments
-	identifier := os.Args[2]
-	var key string
-	showAll := true
-	autoMode := false
-
-	// Parse arguments
-	for i := 3; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		if arg == "--all" {
-			showAll = true
-		} else if arg == "--auto" || arg == "-a" {
-			autoMode = true
-		} else if !strings.HasPrefix(arg, "--") {
-			// This is the key argument
-			key = arg
-			showAll = false
-		}
-	}
-
+func handleQuery(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, key string, showAll bool, autoMode bool) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
