@@ -99,16 +99,22 @@ func main() {
 	}
 }
 
-// parseCommand 解析命令行参数，返回命令和位置参数
-// commands[0] 是命令名，commands[1:] 是位置参数
-func parseCommand() []string {
+// parseCommand 解析命令行参数，返回获取命令参数的函数
+// 使用 lambda 表达式封装参数访问
+func parseCommand() func(int) string {
 	pflag.Parse()
-	return pflag.Args()
+	args := pflag.Args()
+	return func(i int) string {
+		if i < len(args) {
+			return args[i]
+		}
+		return ""
+	}
 }
 
 func run() error {
-	// 一次性解析所有参数
-	commands := parseCommand()
+	// 一次性解析所有参数，返回 lambda 函数
+	getCommand := parseCommand()
 
 	if verbose {
 		msmart.Verbose = true
@@ -122,12 +128,13 @@ func run() error {
 		return fmt.Errorf("unsupported device type: %s", deviceType)
 	}
 
-	if len(commands) < 1 {
+	// 获取命令
+	command := getCommand(0)
+	if command == "" {
 		printUsage()
 		return fmt.Errorf("no command provided")
 	}
 
-	command := commands[0]
 	configPath := config.DefaultConfigPath()
 
 	// Commands that don't need config
@@ -143,93 +150,75 @@ func run() error {
 	// Execute command
 	switch command {
 	case "discover":
-		targetHost := ""
-		if len(commands) > 1 {
-			targetHost = commands[1]
-		}
-		return handleDiscover(configPath, region, targetHost, autoConnect, account, password, discoveryCount)
+		return handleDiscover(configPath, region, getCommand(1), autoConnect, account, password, discoveryCount)
 	case "list":
 		return handleList(configPath)
 	case "bind":
-		if len(commands) < 2 {
+		identifier := getCommand(1)
+		if identifier == "" {
 			return fmt.Errorf("bind requires identifier")
 		}
-		return handleBind(configPath, commands[1], name)
+		return handleBind(configPath, identifier, name)
 	case "unbind":
-		if len(commands) < 2 {
+		identifier := getCommand(1)
+		if identifier == "" {
 			return fmt.Errorf("unbind requires identifier")
 		}
-		return handleUnbind(configPath, commands[1])
+		return handleUnbind(configPath, identifier)
 	case "status":
-		identifier := ""
-		if len(commands) > 1 {
-			identifier = commands[1]
-		}
-		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy)
+		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, getCommand(1), autoMode, showCapabilities, capabilitiesFile, showEnergy)
 	case "on":
-		identifier := ""
-		if len(commands) > 1 {
-			identifier = commands[1]
-		}
-		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
+		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey, getCommand(1), autoMode)
 	case "off":
-		identifier := ""
-		if len(commands) > 1 {
-			identifier = commands[1]
-		}
-		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
+		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey, getCommand(1), autoMode)
 	case "temp":
-		if len(commands) < 3 {
+		identifier := getCommand(1)
+		tempStr := getCommand(2)
+		if identifier == "" || tempStr == "" {
 			return fmt.Errorf("temp requires identifier and temperature")
 		}
-		temp, err := ParseTemp(commands[2])
+		temp, err := ParseTemp(tempStr)
 		if err != nil {
-			return fmt.Errorf("invalid temperature: %s", commands[2])
+			return fmt.Errorf("invalid temperature: %s", tempStr)
 		}
-		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, commands[1], temp, autoMode)
+		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, temp, autoMode)
 	case "mode":
-		if len(commands) < 3 {
+		identifier := getCommand(1)
+		modeStr := getCommand(2)
+		if identifier == "" || modeStr == "" {
 			return fmt.Errorf("mode requires identifier and mode")
 		}
-		mode, err := ParseMode(commands[2])
+		mode, err := ParseMode(modeStr)
 		if err != nil {
-			return fmt.Errorf("invalid mode: %s", commands[2])
+			return fmt.Errorf("invalid mode: %s", modeStr)
 		}
-		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, commands[1], mode, autoMode)
+		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, mode, autoMode)
 	case "fan":
-		if len(commands) < 3 {
+		identifier := getCommand(1)
+		fanStr := getCommand(2)
+		if identifier == "" || fanStr == "" {
 			return fmt.Errorf("fan requires identifier and fan speed")
 		}
-		speed, err := ParseFanSpeed(commands[2])
+		speed, err := ParseFanSpeed(fanStr)
 		if err != nil {
-			return fmt.Errorf("invalid fan speed: %s", commands[2])
+			return fmt.Errorf("invalid fan speed: %s", fanStr)
 		}
-		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, commands[1], speed, autoMode)
+		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, speed, autoMode)
 	case "swing":
-		if len(commands) < 3 {
+		identifier := getCommand(1)
+		swingStr := getCommand(2)
+		if identifier == "" || swingStr == "" {
 			return fmt.Errorf("swing requires identifier and swing mode")
 		}
-		swing, err := ParseSwingMode(commands[2])
+		swing, err := ParseSwingMode(swingStr)
 		if err != nil {
-			return fmt.Errorf("invalid swing mode: %s", commands[2])
+			return fmt.Errorf("invalid swing mode: %s", swingStr)
 		}
-		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, commands[1], swing, autoMode)
+		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, swing, autoMode)
 	case "set":
-		identifier := ""
-		if len(commands) > 1 {
-			identifier = commands[1]
-		}
-		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, tempValue, modeValue, fanValue, swingValue, powerValue)
+		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, getCommand(1), autoMode, tempValue, modeValue, fanValue, swingValue, powerValue)
 	case "query":
-		identifier := ""
-		key := ""
-		if len(commands) > 1 {
-			identifier = commands[1]
-		}
-		if len(commands) > 2 {
-			key = commands[2]
-		}
-		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, key, showAll, autoMode)
+		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, getCommand(1), getCommand(2), showAll, autoMode)
 	case "download":
 		return handleDownload(configPath, region, account, password)
 	default:
