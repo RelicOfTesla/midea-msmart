@@ -3,12 +3,12 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
+	"github.com/spf13/pflag"
 )
 
 // ========== 参数值映射 ==========
@@ -67,6 +67,8 @@ var (
 	}
 )
 
+// ========== 辅助函数 ==========
+
 // ========== 参数解析函数 ==========
 
 // ParseMode 解析模式字符串
@@ -105,66 +107,11 @@ func ParseTemp(s string) (float64, error) {
 	return temp, nil
 }
 
-// ========== 参数查找函数 ==========
-
-// FindFlag 查找 flag 参数的值
-// 返回值: (value, found)
-func FindFlag(args []string, flag string) (string, bool) {
-	for i := 0; i < len(args); i++ {
-		if args[i] == flag || args[i] == "-"+flag {
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				return args[i+1], true
-			}
-			return "", true // flag 存在但没有值
-		}
-	}
-	return "", false
-}
-
-// FindBoolFlag 查找布尔 flag 参数
-// 返回值: found
-func FindBoolFlag(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag || arg == "-"+flag || arg == "-a" {
-			return true
-		}
-	}
-	return false
-}
-
-// FindIntFlag 查找整数 flag 参数的值
-func FindIntFlag(args []string, flag string) (int, bool, error) {
-	val, found := FindFlag(args, flag)
-	if !found {
-		return 0, false, nil
-	}
-	i, err := strconv.Atoi(val)
-	if err != nil {
-		return 0, true, fmt.Errorf("invalid integer value for %s: %s", flag, val)
-	}
-	return i, true, nil
-}
-
 // ========== 输出辅助函数 ==========
 
 // PrintError 统一的错误输出
 func PrintError(format string, args ...interface{}) {
 	fmt.Printf("❌ "+format+"\n", args...)
-}
-
-// PrintSuccess 统一的成功输出
-func PrintSuccess(format string, args ...interface{}) {
-	fmt.Printf("✅ "+format+"\n", args...)
-}
-
-// PrintWarning 统一的警告输出
-func PrintWarning(format string, args ...interface{}) {
-	fmt.Printf("⚠️  "+format+"\n", args...)
-}
-
-// PrintInfo 统一的信息输出
-func PrintInfo(format string, args ...interface{}) {
-	fmt.Printf("ℹ️  "+format+"\n", args...)
 }
 
 // ========== 命令参数解析函数 ==========
@@ -226,16 +173,16 @@ func parseUnbindArgs(args []string) (identifier string) {
 
 // parseStatusArgs 解析 status 命令参数（使用 flag.FlagSet）
 func parseStatusArgs(args []string) (identifier string, autoMode bool, showCapabilities bool, capabilitiesFile string, showEnergy bool) {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
-	fs.BoolVar(&showCapabilities, "capabilities", false, "Show capabilities")
-	fs.StringVar(&capabilitiesFile, "capabilities-file", "", "Save capabilities to file")
-	fs.BoolVar(&showEnergy, "energy", false, "Show energy info")
+	fs := pflag.NewFlagSet("status", pflag.ContinueOnError)
+	// 忽略未知 flags（全局 flags）
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
+	fs.BoolVarP(&showCapabilities, "capabilities", "c", false, "Show capabilities")
+	fs.StringVarP(&capabilitiesFile, "capabilities-file", "", "", "Save capabilities to file")
+	fs.BoolVarP(&showEnergy, "energy", "e", false, "Show energy info")
 
-	// 解析参数，忽略错误（用户可能输入未知参数）
 	fs.Parse(args)
 
-	// 剩余的位置参数
 	if fs.NArg() > 0 {
 		identifier = fs.Arg(0)
 	}
@@ -244,8 +191,10 @@ func parseStatusArgs(args []string) (identifier string, autoMode bool, showCapab
 
 // parsePowerArgs 解析 on/off 命令参数（使用 flag.FlagSet）
 func parsePowerArgs(args []string) (identifier string, autoMode bool) {
-	fs := flag.NewFlagSet("power", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs := pflag.NewFlagSet("power", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
 
 	fs.Parse(args)
 
@@ -257,8 +206,10 @@ func parsePowerArgs(args []string) (identifier string, autoMode bool) {
 
 // parseTempArgs 解析 temp 命令参数（使用 flag.FlagSet）
 func parseTempArgs(args []string) (identifier string, temp float64, autoMode bool, err error) {
-	fs := flag.NewFlagSet("temp", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs := pflag.NewFlagSet("temp", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
 
 	fs.Parse(args)
 
@@ -279,8 +230,10 @@ func parseTempArgs(args []string) (identifier string, temp float64, autoMode boo
 
 // parseModeArgs 解析 mode 命令参数（使用 flag.FlagSet）
 func parseModeArgs(args []string) (identifier string, mode ac.OperationalMode, autoMode bool, err error) {
-	fs := flag.NewFlagSet("mode", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs := pflag.NewFlagSet("mode", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
 
 	fs.Parse(args)
 
@@ -301,8 +254,10 @@ func parseModeArgs(args []string) (identifier string, mode ac.OperationalMode, a
 
 // parseFanArgs 解析 fan 命令参数（使用 flag.FlagSet）
 func parseFanArgs(args []string) (identifier string, speed ac.FanSpeed, autoMode bool, err error) {
-	fs := flag.NewFlagSet("fan", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs := pflag.NewFlagSet("fan", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
 
 	fs.Parse(args)
 
@@ -323,8 +278,10 @@ func parseFanArgs(args []string) (identifier string, speed ac.FanSpeed, autoMode
 
 // parseSwingArgs 解析 swing 命令参数（使用 flag.FlagSet）
 func parseSwingArgs(args []string) (identifier string, swing ac.SwingMode, autoMode bool, err error) {
-	fs := flag.NewFlagSet("swing", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs := pflag.NewFlagSet("swing", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
 
 	fs.Parse(args)
 
@@ -347,13 +304,15 @@ func parseSwingArgs(args []string) (identifier string, swing ac.SwingMode, autoM
 func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *float64, modeValue *ac.OperationalMode, speedValue *ac.FanSpeed, swingValue *ac.SwingMode, powerValue *bool, err error) {
 	var tempStr, modeStr, fanStr, swingStr, powerStr string
 
-	fs := flag.NewFlagSet("set", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
-	fs.StringVar(&tempStr, "temp", "", "Temperature (16-30)")
-	fs.StringVar(&modeStr, "mode", "", "Mode (cool/heat/auto/dry/fan)")
-	fs.StringVar(&fanStr, "fan", "", "Fan speed (auto/low/medium/high/silent)")
-	fs.StringVar(&swingStr, "swing", "", "Swing mode (off/vertical/horizontal/both)")
-	fs.StringVar(&powerStr, "power", "", "Power state (on/off)")
+
+	fs := pflag.NewFlagSet("set", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
+	fs.StringVarP(&tempStr, "temp", "t", "", "Temperature (16-30)")
+	fs.StringVarP(&modeStr, "mode", "m", "", "Mode (cool/heat/auto/dry/fan)")
+	fs.StringVarP(&fanStr, "fan", "f", "", "Fan speed (auto/low/medium/high/silent)")
+	fs.StringVarP(&swingStr, "swing", "s", "", "Swing mode (off/vertical/horizontal/both)")
+	fs.StringVarP(&powerStr, "power", "p", "", "Power state (on/off)")
 
 	fs.Parse(args)
 
@@ -435,8 +394,10 @@ func parseSetArgs(args []string) (identifier string, autoMode bool, tempValue *f
 func parseQueryArgs(args []string) (identifier string, key string, showAll bool, autoMode bool) {
 	showAll = true
 
-	fs := flag.NewFlagSet("query", flag.ContinueOnError)
-	fs.BoolVar(&autoMode, "auto", false, "Auto discover device")
+
+	fs := pflag.NewFlagSet("query", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
 	fs.BoolVar(&showAll, "all", true, "Show all properties")
 
 	fs.Parse(args)
