@@ -60,7 +60,8 @@ var (
 	discoveryCount   int
 )
 
-func init() {
+// setupFlags 设置命令行参数
+func setupFlags() {
 	// Global flags
 	pflag.StringVarP(&region, "region", "r", msmart.DefaultCloudRegion, "Cloud region (CN, US, EU)")
 	pflag.StringVarP(&deviceType, "device_type", "d", "AC", "Device type (AC, CC)")
@@ -90,6 +91,7 @@ func init() {
 }
 
 func main() {
+	setupFlags()
 	if err := run(); err != nil {
 		// Print error if not already printed
 		fmt.Printf("❌ 错误: %v\n", err)
