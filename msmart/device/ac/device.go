@@ -12,6 +12,52 @@ import (
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
 
+// SubmitMode defines how a property should be submitted
+type SubmitMode int
+
+const (
+	SubmitModeFullState   SubmitMode = iota // Requires full state submission (SetStateCommand)
+	SubmitModeSingleProperty                // Supports single property submission (SetPropertiesCommand)
+	SubmitModeRefreshFirst                  // Needs to refresh current state before submission
+)
+
+// propertyConfig defines the submission mode for each property
+type propertyConfig struct {
+	mode       SubmitMode
+	propertyId PropertyId // Only valid for SubmitModeSingleProperty
+}
+
+// propertySubmitConfig is the global configuration map for property submission modes
+// This determines how each property should be handled during Apply()
+var propertySubmitConfig = map[string]propertyConfig{
+	// Full state submission - main AC controls
+	"power_state":         {mode: SubmitModeRefreshFirst}, // Need current state to avoid accidental power off
+	"target_temperature":  {mode: SubmitModeFullState},
+	"operational_mode":    {mode: SubmitModeFullState},
+	"fan_speed":           {mode: SubmitModeFullState},
+	"swing_mode":          {mode: SubmitModeFullState},
+	"eco":                 {mode: SubmitModeFullState},
+	"turbo":               {mode: SubmitModeFullState},
+	"freeze_protection":   {mode: SubmitModeFullState},
+	"sleep":               {mode: SubmitModeFullState},
+	"fahrenheit":          {mode: SubmitModeFullState},
+	"follow_me":           {mode: SubmitModeFullState},
+	"purifier":            {mode: SubmitModeFullState},
+	"target_humidity":     {mode: SubmitModeFullState},
+	"aux_heat":            {mode: SubmitModeFullState},
+	"independent_aux_heat": {mode: SubmitModeFullState},
+	"beep_on":             {mode: SubmitModeFullState},
+
+	// Single property submission - specific features
+	"swing_ud_angle": {mode: SubmitModeSingleProperty, propertyId: PropertyIdSwingUdAngle},
+	"swing_lr_angle": {mode: SubmitModeSingleProperty, propertyId: PropertyIdSwingLrAngle},
+	"buzzer":         {mode: SubmitModeSingleProperty, propertyId: PropertyIdBuzzer},
+	"breezeless":     {mode: SubmitModeSingleProperty, propertyId: PropertyIdBreezeless},
+	"breeze_away":    {mode: SubmitModeSingleProperty, propertyId: PropertyIdBreezeAway},
+	"rate_select":    {mode: SubmitModeSingleProperty, propertyId: PropertyIdRateSelect},
+	"fresh_air":      {mode: SubmitModeSingleProperty, propertyId: PropertyIdFreshAir},
+}
+
 // FanSpeed represents fan speed enum
 type FanSpeed int
 
@@ -810,6 +856,7 @@ type AirConditioner struct {
 	// Supported properties
 	supportedProperties map[PropertyId]bool
 	updatedProperties   map[PropertyId]bool
+	needsRefresh        bool // Flag to indicate if Refresh() is needed before Apply()
 }
 
 // NewAirConditioner creates a new AirConditioner instance
@@ -1448,7 +1495,47 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 		slog.Warn("Device is not capable of aux mode", "mode", ac.auxMode)
 	}
 
-	// Build SetStateCommand
+	// Check if we need to refresh state before applying
+	// This is needed for properties marked as SubmitModeRefreshFirst
+	if ac.needsRefresh || ac.powerState == nil {
+		if err := ac.Refresh(ctx); err != nil {
+			return err
+		}
+		ac.needsRefresh = false
+	}
+
+	// Apply single-property updates if any
+	if len(ac.updatedProperties) > 0 {
+		properties := make(map[PropertyId]interface{})
+		for prop := range ac.updatedProperties {
+			// Get property value based on PropertyId
+			switch prop {
+			case PropertyIdSwingUdAngle:
+				properties[prop] = ac.verticalSwingAngle
+			case PropertyIdSwingLrAngle:
+				properties[prop] = ac.horizontalSwingAngle
+			case PropertyIdBuzzer:
+				properties[prop] = ac.beepOn
+			case PropertyIdBreezeless:
+				properties[prop] = ac.breezeMode == BreezeModeBreezeless
+			case PropertyIdBreezeAway:
+				properties[prop] = ac.breezeMode == BreezeModeBreezeAway
+			case PropertyIdRateSelect:
+				properties[prop] = ac.rateSelect
+			case PropertyIdFreshAir:
+				properties[prop] = true // TODO: add fresh air field
+			}
+		}
+
+		if err := ac.applyProperties(ctx, properties); err != nil {
+			return err
+		}
+
+		// Clear updated properties after successful apply
+		ac.updatedProperties = make(map[PropertyId]bool)
+	}
+
+	// Build SetStateCommand for main state
 	cmd := NewSetStateCommand()
 	cmd.BeepOn = ac.beepOn
 	cmd.PowerOn = ptrToVal(ac.powerState, false)

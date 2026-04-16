@@ -4,7 +4,9 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -42,6 +44,7 @@ type GlobalFlags struct {
 	DeviceToken string
 	DeviceKey   string
 	Verbose     bool
+	JSON        bool // Output in JSON format
 
 	// Subcommand flags (shared across commands)
 	AutoMode         bool
@@ -70,6 +73,7 @@ func setupFlags(flags *GlobalFlags) {
 	pflag.StringVarP(&flags.DeviceToken, "token", "T", "", "Auth token for V3 devices")
 	pflag.StringVarP(&flags.DeviceKey, "key", "k", "", "Auth key for V3 devices")
 	pflag.BoolVarP(&flags.Verbose, "verbose", "v", false, "Verbose output")
+	pflag.BoolVarP(&flags.JSON, "json", "j", false, "Output in JSON format")
 
 	// Subcommand flags
 	pflag.BoolVarP(&flags.AutoMode, "auto", "a", false, "Auto discover device")
@@ -79,6 +83,8 @@ func setupFlags(flags *GlobalFlags) {
 	pflag.IntVar(&flags.DiscoveryCount, "count", 3, "Discovery packet count")
 	pflag.BoolVarP(&flags.ShowEnergy, "energy", "e", false, "Show energy info")
 	pflag.BoolVar(&flags.ShowAll, "all", false, "Show all properties")
+	pflag.BoolVar(&flags.ShowCapabilities, "capabilities", false, "Show device capabilities")
+	pflag.StringVar(&flags.CapabilitiesFile, "capabilities-file", "", "Save capabilities to file")
 	pflag.StringVarP(&flags.TempValue, "temp", "t", "", "Temperature (16-30)")
 	pflag.StringVarP(&flags.ModeValue, "mode", "m", "", "Mode (cool/heat/auto/dry/fan)")
 	pflag.StringVarP(&flags.FanValue, "fan", "f", "", "Fan speed (auto/low/medium/high/silent)")
@@ -89,12 +95,35 @@ func setupFlags(flags *GlobalFlags) {
 	pflag.Usage = printUsage
 }
 
+// setupLogger 设置日志输出
+// 如果 jsonMode 为 true，日志输出为 JSON 格式到 stderr
+// 否则输出为文本格式到 stdout
+func setupLogger(jsonMode bool) {
+	var handler slog.Handler
+	if jsonMode {
+		// JSON 格式输出到 stderr
+		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+	} else {
+		// 文本格式输出到 stdout
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
 func main() {
 	flags := &GlobalFlags{}
 	setupFlags(flags)
+	
+	// 设置日志输出（根据 --json 参数）
+	setupLogger(flags.JSON)
+	
 	if err := run(flags); err != nil {
 		// Print error if not already printed
-		fmt.Printf("❌ 错误: %v\n", err)
+		slog.Error("错误", "error", err)
 		os.Exit(1)
 	}
 }
@@ -129,8 +158,7 @@ func run(flags *GlobalFlags) error {
 	// Validate device type
 	deviceTypeStr := strings.ToUpper(flags.DeviceType)
 	if _, ok := deviceTypeMap[deviceTypeStr]; !ok {
-		fmt.Printf("❌ 不支持的设备类型: %s\n", flags.DeviceType)
-		fmt.Println("   支持的设备类型: AC (空调), CC (商业空调)")
+		slog.Error("不支持的设备类型", "type", flags.DeviceType, "supported", "AC (空调), CC (商业空调)")
 		return fmt.Errorf("unsupported device type: %s", flags.DeviceType)
 	}
 
@@ -228,7 +256,7 @@ func run(flags *GlobalFlags) error {
 	case "download":
 		return handleDownload(configPath, flags, getCommand(1))
 	default:
-		fmt.Printf("❌ 未知命令: %s\n", command)
+		slog.Error("未知命令", "command", command)
 		printUsage()
 		return fmt.Errorf("unknown command: %s", command)
 	}
@@ -326,14 +354,14 @@ set命令选项:
 // ============================================================================
 
 func handleDiscover(configPath string, flags *GlobalFlags, targetHost string) error {
-	fmt.Println("🔍 正在发现设备...")
+	slog.Info("正在发现设备...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Printf("❌ 加载配置失败: %v\n", err)
+		slog.Error("加载配置失败", "error", err)
 		return err
 	}
 
@@ -348,7 +376,7 @@ func handleDiscover(configPath string, flags *GlobalFlags, targetHost string) er
 	// Set target host if provided (for single device discovery)
 	if targetHost != "" {
 		discoverConfig.Target = targetHost
-		fmt.Printf("🎯 目标设备: %s\n", targetHost)
+		slog.Info("目标设备", "host", targetHost)
 	}
 
 	// Set account and password if provided
@@ -361,21 +389,21 @@ func handleDiscover(configPath string, flags *GlobalFlags, targetHost string) er
 
 	// Even if there's an error, check if we discovered any devices
 	if err != nil && len(devices) == 0 {
-		fmt.Printf("❌ 发现设备失败: %v\n", err)
+		slog.Error("发现设备失败", "error", err)
 		return err
 	}
 
 	// Log warning if there was an error but we have devices
 	if err != nil && len(devices) > 0 {
-		fmt.Printf("⚠️  发现设备时有错误: %v\n", err)
+		slog.Warn("发现设备时有错误", "error", err)
 	}
 
 	if len(devices) == 0 {
-		fmt.Println("⚠️  未发现任何设备")
+		slog.Warn("未发现任何设备")
 		return nil
 	}
 
-	fmt.Printf("\n✅ 发现 %d 台设备\n\n", len(devices))
+	slog.Info("发现设备", "count", len(devices))
 
 	for _, d := range devices {
 		// Get device info
@@ -450,26 +478,26 @@ func handleDiscover(configPath string, flags *GlobalFlags, targetHost string) er
 
 	// Save config
 	if err := cfg.Save(configPath); err != nil {
-		fmt.Printf("\n❌ 保存配置失败: %v\n", err)
+		slog.Error("保存配置失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("\n💾 配置已保存到: %s\n", configPath)
-	fmt.Println("\n💡 使用 'midea bind <id|ip> -n <名称>' 来为设备命名")
+	slog.Info("配置已保存", "path", configPath)
+	slog.Info("使用 'midea bind <id|ip> -n <名称>' 来为设备命名")
 	return nil
 }
 
 func handleList(configPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Printf("❌ 加载配置失败: %v\n", err)
+		slog.Error("加载配置失败", "error", err)
 		return err
 	}
 
 	devices := cfg.ListDevices()
 	if len(devices) == 0 {
-		fmt.Println("📋 暂无设备配置")
-		fmt.Println("💡 使用 'midea discover' 来发现设备")
+		slog.Info("暂无设备配置")
+		slog.Info("使用 'midea discover' 来发现设备")
 		return nil
 	}
 
@@ -496,7 +524,7 @@ func handleList(configPath string) error {
 	}
 
 	fmt.Println("─────────────────────────────────────────────────────────────")
-	fmt.Printf("配置文件: %s\n", configPath)
+	slog.Info("配置文件", "path", configPath)
 	return nil
 }
 
@@ -506,55 +534,55 @@ func handleList(configPath string) error {
 
 func handleBind(configPath string, identifier string, name string) error {
 	if name == "" {
-		fmt.Println("❌ 请指定名称: midea bind <id|sn|ip> -n <名称>")
+		slog.Error("请指定名称", "usage", "midea bind <id|sn|ip> -n <名称>")
 		return fmt.Errorf("name not specified for bind command")
 	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Printf("❌ 加载配置失败: %v\n", err)
+		slog.Error("加载配置失败", "error", err)
 		return err
 	}
 
 	if !cfg.BindName(identifier, name) {
-		fmt.Printf("❌ 未找到设备: %s\n", identifier)
-		fmt.Println("💡 使用 'midea list' 查看设备列表")
+		slog.Error("未找到设备", "identifier", identifier)
+		slog.Info("使用 'midea list' 查看设备列表")
 		return fmt.Errorf("device not found: %s", identifier)
 	}
 
 	if err := cfg.Save(configPath); err != nil {
-		fmt.Printf("❌ 保存配置失败: %v\n", err)
+		slog.Error("保存配置失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ 已绑定: %s -> %s\n", identifier, name)
+	slog.Info("已绑定", "identifier", identifier, "name", name)
 	return nil
 }
 
 func handleUnbind(configPath string, identifier string) error {
 	if identifier == "" {
-		fmt.Println("❌ 用法: midea unbind <name|id>")
+		slog.Error("用法错误", "usage", "midea unbind <name|id>")
 		return fmt.Errorf("insufficient arguments for unbind command")
 	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Printf("❌ 加载配置失败: %v\n", err)
+		slog.Error("加载配置失败", "error", err)
 		return err
 	}
 
 	if !cfg.RemoveDevice(identifier) {
-		fmt.Printf("❌ 未找到设备: %s\n", identifier)
-		fmt.Println("💡 使用 'midea list' 查看设备列表")
+		slog.Error("未找到设备", "identifier", identifier)
+		slog.Info("使用 'midea list' 查看设备列表")
 		return fmt.Errorf("device not found: %s", identifier)
 	}
 
 	if err := cfg.Save(configPath); err != nil {
-		fmt.Printf("❌ 保存配置失败: %v\n", err)
+		slog.Error("保存配置失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ 已解绑: %s\n", identifier)
+	slog.Info("已解绑", "identifier", identifier)
 	return nil
 }
 
@@ -611,7 +639,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 	case DeviceTypeCC:
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(device.IP, int(deviceID), device.Port)
-		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
+		slog.Info("商业空调设备 (CC) 支持有限,部分命令可能不可用")
 		return device, ccDevice, nil
 	default:
 		// Create Air Conditioner (default)
@@ -640,7 +668,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
-				fmt.Println("✅ 已认证，复用现有连接")
+				slog.Info("已认证，复用现有连接")
 			} else {
 				// Try to use cached localKey if available and not expired
 				localKeyValid := false
@@ -649,7 +677,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 					if err == nil {
 						expiration, err := time.Parse(time.RFC3339, device.LocalKeyExpire)
 						if err == nil && acDevice.SetLocalKey(localKeyBytes, expiration) {
-							fmt.Println("✅ 使用缓存的 LocalKey 已认证")
+							slog.Info("使用缓存的 LocalKey 已认证")
 							localKeyValid = true
 						}
 					}
@@ -659,18 +687,18 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 				if localKeyValid {
 					// Skip authentication, connection will be established when needed
 				} else {
-					fmt.Println("🔐 正在认证...")
+					slog.Info("正在认证...")
 					if err := acDevice.Authenticate(token, key); err != nil {
 						return nil, nil, fmt.Errorf("认证失败: %w", err)
 					}
-					fmt.Println("✅ 认证成功")
+					slog.Info("认证成功")
 
 					// Save localKey to config after successful authentication
 					if localKey, expiration := acDevice.GetLocalKey(); localKey != nil {
 						device.LocalKey = hex.EncodeToString(localKey)
 						device.LocalKeyExpire = expiration.Format(time.RFC3339)
 						if err := cfg.Save(configPath); err != nil {
-							fmt.Printf("⚠️  保存 LocalKey 失败: %v\n", err)
+							slog.Warn("保存 LocalKey 失败", "error", err)
 						}
 					}
 				}
@@ -704,7 +732,7 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 	case DeviceTypeCC:
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(host, deviceID, 6444)
-		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
+		slog.Info("商业空调设备 (CC) 支持有限,部分命令可能不可用")
 		return device, ccDevice, nil
 	default:
 		// Create Air Conditioner (default)
@@ -729,13 +757,13 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
-				fmt.Println("✅ 已认证，复用现有连接")
+				slog.Info("已认证，复用现有连接")
 			} else {
-				fmt.Println("🔐 正在认证...")
+				slog.Info("正在认证...")
 				if err := acDevice.Authenticate(token, key); err != nil {
 					return nil, nil, fmt.Errorf("认证失败: %w", err)
 				}
-				fmt.Println("✅ 认证成功")
+				slog.Info("认证成功")
 			}
 		}
 
@@ -745,7 +773,7 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 
 // getDeviceAuto automatically discovers a device and gets token/key for V3 devices
 func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (*config.Device, interface{}, error) {
-	fmt.Printf("🔍 正在自动发现设备: %s\n", identifier)
+	slog.Info("正在自动发现设备", "identifier", identifier)
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -808,7 +836,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 		key = *k
 	}
 
-	fmt.Printf("✅ 发现设备: %s (%s) [ID: %d, 版本: V%d]\n", deviceType, d.GetIP(), deviceID, version)
+	slog.Info("发现设备", "type", deviceType, "ip", d.GetIP(), "id", deviceID, "version", version)
 
 	// Check if it's a V3 device
 	if version == 3 && (token == "" || key == "") {
@@ -845,7 +873,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 	// Save to config
 	cfg.AddDevice(*device)
 	if err := cfg.Save(configPath); err != nil {
-		fmt.Printf("⚠️  保存配置失败: %v\n", err)
+		slog.Warn("保存配置失败", "error", err)
 	}
 
 	// Use device type from parameter, or from discovered device, or default to AC
@@ -863,7 +891,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 	case DeviceTypeCC:
 		// Create Commercial Air Conditioner
 		ccDevice := cc.NewCommercialAirConditioner(d.GetIP(), int(deviceID), d.GetPort())
-		fmt.Println("i️  商业空调设备 (CC) 支持有限,部分命令可能不可用")
+		slog.Info("商业空调设备 (CC) 支持有限,部分命令可能不可用")
 		return device, ccDevice, nil
 	default:
 		// Create Air Conditioner (default)
@@ -888,7 +916,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
-				fmt.Println("✅ 已认证，复用现有连接")
+				slog.Info("已认证，复用现有连接")
 
 				// Save localKey to config (may have been updated by cached LAN)
 				localKey, expiration := acDevice.GetLocalKey()
@@ -907,15 +935,15 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 					}
 					
 					if err := cfg.Save(configPath); err != nil {
-						fmt.Printf("⚠️  保存 LocalKey 失败: %v\n", err)
+						slog.Warn("保存 LocalKey 失败", "error", err)
 					}
 				}
 			} else {
-				fmt.Println("🔐 正在认证...")
+				slog.Info("正在认证...")
 				if err := acDevice.Authenticate(tokenBytes, keyBytes); err != nil {
 					return nil, nil, fmt.Errorf("认证失败: %w", err)
 				}
-				fmt.Println("✅ 认证成功")
+				slog.Info("认证成功")
 
 				// Save localKey to config after successful authentication
 				if localKey, expiration := acDevice.GetLocalKey(); localKey != nil {
@@ -932,7 +960,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 					}
 					
 					if err := cfg.Save(configPath); err != nil {
-						fmt.Printf("⚠️  保存 LocalKey 失败: %v\n", err)
+						slog.Warn("保存 LocalKey 失败", "error", err)
 					}
 				}
 			}
@@ -957,18 +985,27 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 		device, deviceObj, err = getDevice(configPath, identifier, deviceTypeStr)
 	}
 	if err != nil {
+		if flags.JSON {
+			printErrorJSON(err)
+		}
 		return err
 	}
 
 	// Get AC device (currently only AC is fully supported)
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		if flags.JSON {
+			printErrorJSON(err)
+		}
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	// Non-JSON mode: print connection info
+	if !flags.JSON {
+		slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+		slog.Info("正在连接...")
+	}
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -977,18 +1014,26 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 	// Get capabilities if requested
 	if flags.ShowCapabilities || flags.CapabilitiesFile != "" {
 		if err := acDevice.GetCapabilities(ctx); err != nil {
-			fmt.Printf("⚠️  获取设备能力失败: %v\n", err)
+			if !flags.JSON {
+				slog.Warn("获取设备能力失败", "error", err)
+			}
 		} else {
 			// If a file path is specified, write to file
 			if flags.CapabilitiesFile != "" {
 				if err := writeCapabilitiesToYAML(acDevice, flags.CapabilitiesFile); err != nil {
-					fmt.Printf("❌ 写入能力信息到文件失败: %v\n", err)
+					if !flags.JSON {
+						slog.Error("写入能力信息到文件失败", "error", err)
+					}
 				} else {
-					fmt.Printf("✅ 设备能力已写入: %s\n", flags.CapabilitiesFile)
+					if !flags.JSON {
+						slog.Info("设备能力已写入", "file", flags.CapabilitiesFile)
+					}
 				}
 			} else {
 				// Display capabilities to screen
-				printCapabilities(acDevice)
+				if !flags.JSON {
+					printCapabilities(acDevice)
+				}
 			}
 		}
 	}
@@ -1000,15 +1045,29 @@ func handleStatus(configPath string, flags *GlobalFlags, deviceTypeStr string, i
 
 	// Refresh state
 	if err := acDevice.Refresh(ctx); err != nil {
-		fmt.Printf("❌ 查询失败: %v\n", err)
+		if flags.JSON {
+			printErrorJSON(err)
+		}
+		if !flags.JSON {
+			slog.Error("查询失败", "error", err)
+		}
 		return err
 	}
 
-	printACState(acDevice)
+	// Print state (JSON or table format)
+	if flags.JSON {
+		printACStateJSON(acDevice)
+	} else {
+		printACState(acDevice)
+	}
 
 	// Display energy usage if requested
 	if flags.ShowEnergy {
-		printEnergyUsage(acDevice)
+		if flags.JSON {
+			printEnergyUsageJSON(acDevice)
+		} else {
+			printEnergyUsage(acDevice)
+		}
 	}
 	return nil
 }
@@ -1082,6 +1141,90 @@ func writeCapabilitiesToYAML(acDevice *ac.AirConditioner, filename string) error
 	}
 
 	return nil
+}
+
+// ACStateJSON represents AC device state in JSON format
+type ACStateJSON struct {
+	Power              *bool    `json:"power"`
+	TargetTemperature  float64  `json:"target_temperature"`
+	IndoorTemperature  *float64 `json:"indoor_temperature,omitempty"`
+	OutdoorTemperature *float64 `json:"outdoor_temperature,omitempty"`
+	Mode               string   `json:"mode"`
+	FanSpeed           string   `json:"fan_speed"`
+	SwingMode          string   `json:"swing_mode"`
+	Eco                bool     `json:"eco"`
+	Turbo              bool     `json:"turbo"`
+}
+
+// EnergyUsageJSON represents energy usage data in JSON format
+type EnergyUsageJSON struct {
+	RealTimePower  *float64 `json:"real_time_power_w,omitempty"`
+	CurrentMonth   *float64 `json:"current_month_kwh,omitempty"`
+	TotalEnergy    *float64 `json:"total_energy_kwh,omitempty"`
+}
+
+// printErrorJSON prints an error message in JSON format to stdout
+func printErrorJSON(err error) {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(map[string]string{"error": err.Error()})
+}
+
+// printACStateJSON prints AC device state in JSON format to stdout
+func printACStateJSON(acDevice *ac.AirConditioner) {
+	// Get mode name
+	modeNames := map[ac.OperationalMode]string{
+		ac.OperationalModeCool:    "cool",
+		ac.OperationalModeHeat:    "heat",
+		ac.OperationalModeAuto:    "auto",
+		ac.OperationalModeDry:     "dry",
+		ac.OperationalModeFanOnly: "fan_only",
+	}
+	modeName := modeNames[acDevice.OperationalMode()]
+
+	// Get fan speed name
+	fanSpeed := acDevice.FanSpeed()
+	var fanName string
+	switch fs := fanSpeed.(type) {
+	case ac.FanSpeed:
+		fanName = SpeedNames[fs]
+	default:
+		fanName = fmt.Sprintf("%v", fs)
+	}
+
+	// Get swing mode name
+	swingName := SwingNames[acDevice.SwingMode()]
+
+	// Create state struct
+	state := ACStateJSON{
+		Power:              acDevice.PowerState(),
+		TargetTemperature:  acDevice.TargetTemperature(),
+		IndoorTemperature:  acDevice.IndoorTemperature(),
+		OutdoorTemperature: acDevice.OutdoorTemperature(),
+		Mode:               modeName,
+		FanSpeed:           fanName,
+		SwingMode:          swingName,
+		Eco:                acDevice.Eco(),
+		Turbo:              acDevice.Turbo(),
+	}
+
+	// Output JSON
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(state)
+}
+
+// printEnergyUsageJSON prints energy usage data in JSON format to stdout
+func printEnergyUsageJSON(acDevice *ac.AirConditioner) {
+	energy := EnergyUsageJSON{
+		RealTimePower: acDevice.GetRealTimePowerUsage(ac.EnergyDataFormatBCD),
+		CurrentMonth:  acDevice.GetCurrentEnergyUsage(ac.EnergyDataFormatBCD),
+		TotalEnergy:   acDevice.GetTotalEnergyUsage(ac.EnergyDataFormatBCD),
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(energy)
 }
 
 func printACState(acDevice *ac.AirConditioner) {
@@ -1196,12 +1339,12 @@ func handlePower(configPath string, flags *GlobalFlags, deviceTypeStr string, on
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1212,15 +1355,15 @@ func handlePower(configPath string, flags *GlobalFlags, deviceTypeStr string, on
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
-		fmt.Printf("❌ 控制失败: %v\n", err)
+		slog.Error("控制失败", "error", err)
 		return err
 	}
 
-	action := "已开机 ✅"
+	action := "已开机"
 	if !on {
-		action = "已关机 ⏹️"
+		action = "已关机"
 	}
-	fmt.Printf("✅ %s %s\n", device.Name, action)
+	slog.Info(device.Name+" "+action, "success", true)
 	return nil
 }
 
@@ -1244,12 +1387,12 @@ func handleTemp(configPath string, flags *GlobalFlags, deviceTypeStr string, ide
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1260,11 +1403,11 @@ func handleTemp(configPath string, flags *GlobalFlags, deviceTypeStr string, ide
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
-		fmt.Printf("❌ 控制失败: %v\n", err)
+		slog.Error("控制失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ %s 温度已设置为 %.0f°C\n", device.Name, temp)
+	slog.Info("温度已设置", "device", device.Name, "temp", temp)
 	return nil
 }
 
@@ -1288,12 +1431,12 @@ func handleMode(configPath string, flags *GlobalFlags, deviceTypeStr string, ide
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1304,11 +1447,11 @@ func handleMode(configPath string, flags *GlobalFlags, deviceTypeStr string, ide
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
-		fmt.Printf("❌ 控制失败: %v\n", err)
+		slog.Error("控制失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ %s 模式已设置为 %s\n", device.Name, ModeNames[mode])
+	slog.Info("模式已设置", "device", device.Name, "mode", ModeNames[mode])
 	return nil
 }
 
@@ -1332,12 +1475,12 @@ func handleFan(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1348,11 +1491,11 @@ func handleFan(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
-		fmt.Printf("❌ 控制失败: %v\n", err)
+		slog.Error("控制失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ %s 风速已设置为 %s\n", device.Name, SpeedNames[speed])
+	slog.Info("风速已设置", "device", device.Name, "speed", SpeedNames[speed])
 	return nil
 }
 
@@ -1376,12 +1519,12 @@ func handleSwing(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1392,11 +1535,11 @@ func handleSwing(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
-		fmt.Printf("❌ 控制失败: %v\n", err)
+		slog.Error("控制失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ %s 摆风已设置为 %s\n", device.Name, SwingNames[swing])
+	slog.Info("摆风已设置", "device", device.Name, "swing", SwingNames[swing])
 	return nil
 }
 
@@ -1421,7 +1564,7 @@ func handleSet(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
@@ -1494,12 +1637,12 @@ func handleSet(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 	}
 
 	if !hasChanges {
-		fmt.Println("❌ 未指定任何更改")
+		slog.Error("未指定任何更改")
 		return fmt.Errorf("no changes specified")
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1507,11 +1650,11 @@ func handleSet(configPath string, flags *GlobalFlags, deviceTypeStr string, iden
 
 	// Apply changes
 	if err := acDevice.Apply(ctx); err != nil {
-		fmt.Printf("❌ 控制失败: %v\n", err)
+		slog.Error("控制失败", "error", err)
 		return err
 	}
 
-	fmt.Printf("✅ %s 已设置: %s\n", device.Name, strings.Join(changes, ", "))
+	slog.Info("已设置", "device", device.Name, "changes", strings.Join(changes, ", "))
 	return nil
 }
 func handleQuery(configPath string, flags *GlobalFlags, deviceTypeStr string, identifier string, key string) error {
@@ -1534,12 +1677,12 @@ func handleQuery(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 	// Get AC device
 	acDevice, err := mustGetACDevice(deviceObj)
 	if err != nil {
-		fmt.Println("❌ " + err.Error())
+		slog.Error(err.Error())
 		return err
 	}
 
-	fmt.Printf("\n🎯 目标设备: %s (%s)\n", device.Name, device.IP)
-	fmt.Println("🔌 正在连接...")
+	slog.Info("目标设备", "name", device.Name, "ip", device.IP)
+	slog.Info("正在连接...")
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1547,7 +1690,7 @@ func handleQuery(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 
 	// Refresh state
 	if err := acDevice.Refresh(ctx); err != nil {
-		fmt.Printf("❌ 查询失败: %v\n", err)
+		slog.Error("查询失败", "error", err)
 		return err
 	}
 
@@ -1622,17 +1765,17 @@ func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
 		}
 
 	default:
-		fmt.Printf("❌ 未知属性: %s\n", key)
-		fmt.Println("支持的属性:")
-		fmt.Println("  temp, temperature, target_temp       - 目标温度")
-		fmt.Println("  indoor_temp, indoor_temperature      - 室内温度")
-		fmt.Println("  outdoor_temp, outdoor_temperature    - 室外温度")
-		fmt.Println("  mode, operational_mode               - 运行模式")
-		fmt.Println("  fan, fan_speed                       - 风速")
-		fmt.Println("  swing, swing_mode                    - 摆风模式")
-		fmt.Println("  power, power_state                   - 电源状态")
-		fmt.Println("  eco                                  - ECO模式")
-		fmt.Println("  turbo                                - 强力模式")
+		slog.Error("未知属性", "key", key)
+		slog.Info("支持的属性:")
+		slog.Info("  temp, temperature, target_temp       - 目标温度")
+		slog.Info("  indoor_temp, indoor_temperature      - 室内温度")
+		slog.Info("  outdoor_temp, outdoor_temperature    - 室外温度")
+		slog.Info("  mode, operational_mode               - 运行模式")
+		slog.Info("  fan, fan_speed                       - 风速")
+		slog.Info("  swing, swing_mode                    - 摆风模式")
+		slog.Info("  power, power_state                   - 电源状态")
+		slog.Info("  eco                                  - ECO模式")
+		slog.Info("  turbo                                - 强力模式")
 		return fmt.Errorf("unknown attribute: %s", key)
 	}
 	return nil
@@ -1641,11 +1784,11 @@ func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
 // handleDownload handles the download command for downloading device protocol and plugin
 func handleDownload(configPath string, flags *GlobalFlags, host string) error {
 	if host == "" {
-		fmt.Println("❌ 用法: midea download <host> [--account <账号> --password <密码>]")
+		slog.Error("用法: midea download <host> [--account <账号> --password <密码>]")
 		return fmt.Errorf("insufficient arguments for download command")
 	}
 
-	fmt.Printf("🔍 正在发现设备: %s\n", host)
+	slog.Info("正在发现设备", "host", host)
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1661,7 +1804,7 @@ func handleDownload(configPath string, flags *GlobalFlags, host string) error {
 
 	devices, err := msmart.Discover(ctx, discoverConfig)
 	if err != nil {
-		fmt.Printf("❌ 发现设备失败: %v\n", err)
+		slog.Error("发现设备失败", "error", err)
 		return err
 	}
 
@@ -1680,10 +1823,10 @@ func handleDownload(configPath string, flags *GlobalFlags, host string) error {
 		return fmt.Errorf("设备没有 SN,无法下载协议")
 	}
 
-	fmt.Printf("✅ 发现设备: 类型=%02X, SN=%s\n", deviceType, *sn)
+	slog.Info("发现设备", "type", fmt.Sprintf("%02X", deviceType), "sn", *sn)
 
 	// Create cloud client
-	fmt.Println("☁️  正在连接云端...")
+	slog.Info("正在连接云端...")
 
 	var cloud *msmart.SmartHomeCloud
 	var accountPtr, passwordPtr *string
@@ -1695,48 +1838,48 @@ func handleDownload(configPath string, flags *GlobalFlags, host string) error {
 
 	cloud, err = msmart.NewSmartHomeCloud(flags.Region, accountPtr, passwordPtr, false, nil)
 	if err != nil {
-		fmt.Printf("❌ 创建云端客户端失败: %v\n", err)
+		slog.Error("创建云端客户端失败", "error", err)
 		return err
 	}
 
 	// Login to cloud
 	if err := cloud.Login(false); err != nil {
-		fmt.Printf("❌ 云端登录失败: %v\n", err)
+		slog.Error("云端登录失败", "error", err)
 		return err
 	}
 
-	fmt.Println("✅ 云端登录成功")
+	slog.Info("云端登录成功")
 
 	// Download Lua protocol
-	fmt.Println("📥 正在下载 Lua 协议...")
+	slog.Info("正在下载 Lua 协议...")
 	luaName, luaContent, err := cloud.GetProtocolLua(deviceType, *sn)
 	if err != nil {
-		fmt.Printf("❌ 下载 Lua 协议失败: %v\n", err)
+		slog.Error("下载 Lua 协议失败", "error", err)
 		return err
 	}
 
 	// Save Lua file
 	if err := os.WriteFile(luaName, []byte(luaContent), 0644); err != nil {
-		fmt.Printf("❌ 保存 Lua 文件失败: %v\n", err)
+		slog.Error("保存 Lua 文件失败", "error", err)
 		return err
 	}
-	fmt.Printf("✅ Lua 协议已保存: %s\n", luaName)
+	slog.Info("Lua 协议已保存", "file", luaName)
 
 	// Download plugin
-	fmt.Println("📥 正在下载插件...")
+	slog.Info("正在下载插件...")
 	pluginName, pluginData, err := cloud.GetPlugin(deviceType, *sn)
 	if err != nil {
-		fmt.Printf("❌ 下载插件失败: %v\n", err)
+		slog.Error("下载插件失败", "error", err)
 		return err
 	}
 
 	// Save plugin file
 	if err := os.WriteFile(pluginName, pluginData, 0644); err != nil {
-		fmt.Printf("❌ 保存插件文件失败: %v\n", err)
+		slog.Error("保存插件文件失败", "error", err)
 		return err
 	}
-	fmt.Printf("✅ 插件已保存: %s\n", pluginName)
+	slog.Info("插件已保存", "file", pluginName)
 
-	fmt.Println("\n✅ 下载完成!")
+	slog.Info("下载完成!")
 	return nil
 }

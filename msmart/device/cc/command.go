@@ -6,14 +6,11 @@ package cc
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
-
-// Logger for the package
-var ccLogger = log.Default()
 
 // Package-level message ID counter (like Python class variable)
 // Thread-safe with mutex
@@ -572,7 +569,7 @@ func (r *ControlResponse) parse(payload []byte) error {
 
 		// Check if control ID is known and log warning if not
 		if !control.IsKnown() {
-			ccLogger.Printf("Warning: Unknown control ID 0x%04X, Size: %d.", rawId, size)
+			slog.Warn("Unknown control ID", "id", fmt.Sprintf("0x%04X", rawId), "size", size)
 		}
 
 		// Parse the property

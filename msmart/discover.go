@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -57,7 +58,7 @@ func getBroadcastAddresses() []string {
 	
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		logger.Printf("Warning: failed to get network interfaces: %v", err)
+		slog.Warn("Failed to get network interfaces", "error", err)
 		return []string{IPv4Broadcast}
 	}
 	
@@ -109,7 +110,7 @@ func getBroadcastAddresses() []string {
 	
 	// If no interfaces found, use the default broadcast address
 	if len(addresses) == 0 {
-		logger.Printf("No suitable network interfaces found, using default broadcast address")
+		slog.Warn("No suitable network interfaces found, using default broadcast address")
 		return []string{IPv4Broadcast}
 	}
 	
@@ -188,20 +189,20 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 		if syscallConn, ok := conn.(syscall.Conn); ok {
 			rawConn, err := syscallConn.SyscallConn()
 			if err != nil {
-				logger.Printf("Warning: failed to get syscall connection: %v", err)
+				slog.Warn("Failed to get syscall connection", "error", err)
 			} else {
 				var setsockoptErr error
 				rawConn.Control(func(fd uintptr) {
 					setsockoptErr = setBroadcastOption(fd)
 				})
 				if setsockoptErr != nil {
-					logger.Printf("Warning: failed to set SO_BROADCAST option: %v", setsockoptErr)
+					slog.Warn("Failed to set SO_BROADCAST option", "error", setsockoptErr)
 				} else {
 					verboseLog("SO_BROADCAST option set successfully")
 				}
 			}
 		} else {
-			logger.Printf("Warning: connection does not implement syscall.Conn")
+			slog.Warn("Connection does not implement syscall.Conn")
 		}
 	}
 
@@ -243,7 +244,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 		for _, targetAddr := range targetAddresses {
 			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", targetAddr, port))
 			if err != nil {
-				logger.Printf("Failed to resolve address %s:%d: %v", targetAddr, port, err)
+				slog.Warn("Failed to resolve address", "address", targetAddr, "port", port, "error", err)
 				continue
 			}
 
@@ -251,7 +252,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 
 			for i := 0; i < config.DiscoveryPackets; i++ {
 				if _, err := conn.WriteTo(DiscoveryMsg, addr); err != nil {
-					logger.Printf("Failed to send discovery to %s:%d: %v", targetAddr, port, err)
+					slog.Warn("Failed to send discovery", "address", targetAddr, "port", port, "error", err)
 				}
 			}
 		}
@@ -535,7 +536,7 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 	port := int(binary.LittleEndian.Uint16(decryptedData[4:6]))
 
 	if ipAddress != ip {
-		logger.Printf("Reported device IP %s does not match received IP %s. Using received IP.", ipAddress, ip)
+		slog.Info("Reported device IP does not match received IP, using received IP", "reported", ipAddress, "received", ip)
 	}
 
 	// Extract serial number
@@ -625,7 +626,7 @@ func ConnectDevice(device *Device, config *DiscoverConfig) error {
 	// Note: The Device.Refresh() method returns an error by default
 	// Subclasses should override it
 	if err := device.Refresh(); err != nil {
-		logger.Printf("Device refresh failed: %v", err)
+		slog.Warn("Device refresh failed", "error", err)
 		// Don't return error as this is expected for base Device class
 	}
 
@@ -675,7 +676,7 @@ func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
 		// Get token and key from cloud
 		token, key, err := cloud.GetToken(udpidHex)
 		if err != nil {
-			logger.Printf("Failed to get token from cloud. Error: %v", err)
+			slog.Warn("Failed to get token from cloud", "error", err)
 			continue
 		}
 

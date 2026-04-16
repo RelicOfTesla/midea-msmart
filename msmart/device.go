@@ -4,14 +4,11 @@ package msmart
 import (
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"reflect"
 	"sync"
 	"time"
 )
-
-// Logger for the package
-var deviceLogger = log.Default()
 
 // Global LAN cache to reuse authenticated connections
 var (
@@ -140,7 +137,7 @@ func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 	responses, err := d.lan.Send(data, Retries)
 	if err != nil {
 		if _, ok := err.(*ProtocolError); ok {
-			deviceLogger.Printf("ERROR: Network error %s:%d: %v", d.ip, d.port, err)
+			slog.Error("Network error", "ip", d.ip, "port", d.port, "error", err)
 			return nil, err
 		}
 	}
@@ -148,7 +145,7 @@ func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 	responseTime := time.Since(start).Seconds()
 
 	if len(responses) == 0 {
-		deviceLogger.Printf("WARNING: No response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
+		slog.Warn("No response from device", "ip", d.ip, "port", d.port, "response_time", responseTime)
 	} else {
 		verboseLog("Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
 	}
@@ -165,7 +162,7 @@ func (d *Device) SendBytes(data []byte) ([][]byte, error) {
 	responses, err := d.lan.Send(data, Retries)
 	if err != nil {
 		if _, ok := err.(*ProtocolError); ok {
-			deviceLogger.Printf("ERROR: Network error %s:%d: %v", d.ip, d.port, err)
+			slog.Error("Network error", "ip", d.ip, "port", d.port, "error", err)
 			return nil, err
 		}
 	}
@@ -173,7 +170,7 @@ func (d *Device) SendBytes(data []byte) ([][]byte, error) {
 	responseTime := time.Since(start).Seconds()
 
 	if len(responses) == 0 {
-		deviceLogger.Printf("WARNING: No response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
+		slog.Warn("No response from device", "ip", d.ip, "port", d.port, "response_time", responseTime)
 	} else {
 		verboseLog("Response from %s:%d in %f seconds.", d.ip, d.port, responseTime)
 	}

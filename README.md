@@ -150,10 +150,11 @@ midea unbind <name|id>
 #### status - 查询设备状态
 
 ```bash
-midea status <name|id> [--auto] [--capabilities [FILE]] [--energy]
+midea status <name|id> [--auto] [--json|-j] [--capabilities [FILE]] [--energy]
 ```
 
 - `--auto`: 自动发现设备并获取 token
+- `--json`, `-j`: 以 JSON 格式输出状态（便于脚本处理）
 - `--capabilities`: 显示设备能力信息
 - `--capabilities FILE`: 将设备能力写入 YAML 文件
 - `--energy`: 显示能耗信息
@@ -317,6 +318,7 @@ set命令选项:
   midea list                          # 列出已保存的设备
   midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备,命名为"客厅"
   midea status 客厅                   # 查询"客厅"空调状态
+  midea status 客厅 --json           # 以 JSON 格式输出状态（便于脚本处理）
   midea status 客厅 --capabilities    # 查询"客厅"空调状态并显示设备能力
   midea status 客厅 --capabilities caps.yaml  # 将设备能力写入 caps.yaml 文件
   midea status 客厅 --energy          # 查询"客厅"空调状态并显示能耗信息
@@ -350,7 +352,9 @@ set命令选项:
       "name": "客厅空调",
       "type": "AC",
       "token": "xxx",
-      "key": "yyy"
+      "key": "yyy",
+      "local_key": "01a74aca...",
+      "local_key_expire": "2026-04-17T01:34:12Z"
     },
     "卧室": {
       "id": "192.168.1.61",
@@ -362,6 +366,16 @@ set命令选项:
   }
 }
 ```
+
+### LocalKey 存储与复用
+
+对于 V3 设备，CLI 会自动缓存 `local_key` 和过期时间：
+
+- **存储**：在认证成功后，自动保存 `local_key` 和过期时间到配置文件
+- **复用**：下次连接时，如果 `local_key` 有效且未过期，直接使用缓存的 key，避免重复认证
+- **过期处理**：如果 `local_key` 已过期，会自动重新认证并更新缓存
+
+这样可以显著减少 V3 设备的连接时间。
 
 ## 🛠️ 开发
 

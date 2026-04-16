@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -25,15 +25,13 @@ type Token []byte
 // Key represents encryption key
 type Key []byte
 
-var logger = log.Default()
-
 // Verbose controls whether debug logs are output
 var Verbose = false
 
 // verboseLog prints a log message only if Verbose is true
-func verboseLog(format string, args ...interface{}) {
+func verboseLog(msg string, args ...any) {
 	if Verbose {
-		logger.Printf(format, args...)
+		slog.Debug(msg, args...)
 	}
 }
 
@@ -187,7 +185,7 @@ func (p *_LanProtocol) DataReceived(data []byte) {
 // ConnectionLost logs connection lost
 func (p *_LanProtocol) ConnectionLost(err error) {
 	if err != nil {
-		logger.Printf("Connection to %s lost. Error: %v", p.peer, err)
+		slog.Error("Connection lost", "peer", p.peer, "error", err)
 		p.queue <- err
 	}
 }
@@ -378,7 +376,7 @@ func (p *_LanProtocolV3) Authenticated() bool {
 	}
 
 	if time.Now().UTC().After(p.localKeyExpiration) {
-		logger.Printf("Authentication with %s has expired.", p.Peer())
+		slog.Warn("Authentication has expired", "peer", p.Peer())
 		return false
 	}
 
@@ -397,19 +395,19 @@ func (p *_LanProtocolV3) DataReceived(data []byte) {
 		// Find start of packet
 		start := bytes.Index(p.buffer, []byte{0x83, 0x70})
 		if start == -1 {
-			logger.Printf("Peer %s: No start of packet found. Buffer: %x", p.Peer(), p.buffer)
+			slog.Debug("No start of packet found", "peer", p.Peer(), "buffer", fmt.Sprintf("%x", p.buffer))
 			return
 		}
 
 		// Trim any leading data
 		if start != 0 {
-			logger.Printf("Peer %s: Ignoring data before packet: %x", p.Peer(), p.buffer[:start])
+			slog.Debug("Ignoring data before packet", "peer", p.Peer(), "data", fmt.Sprintf("%x", p.buffer[:start]))
 			p.buffer = p.buffer[start:]
 		}
 
 		// Check if the header has been received
 		if len(p.buffer) < 6 {
-			logger.Printf("Peer %s: Buffer too short. Buffer: %x", p.Peer(), p.buffer)
+			slog.Debug("Buffer too short", "peer", p.Peer(), "buffer", fmt.Sprintf("%x", p.buffer))
 			return
 		}
 
@@ -418,7 +416,7 @@ func (p *_LanProtocolV3) DataReceived(data []byte) {
 
 		// Ensure entire packet is received
 		if len(p.buffer) < totalSize {
-			logger.Printf("Peer %s: Partial packet received. Buffer: %x", p.Peer(), p.buffer)
+			slog.Debug("Partial packet received", "peer", p.Peer(), "buffer", fmt.Sprintf("%x", p.buffer))
 			return
 		}
 
@@ -694,8 +692,10 @@ func (p *_LanProtocolV3) Authenticate(token []byte, key []byte) error {
 	// Set expiration time
 	p.localKeyExpiration = time.Now().UTC().Add(AuthenticationExpiration)
 
-	logger.Printf("Authentication with %s successful. Expiration: %s, Local key: %x",
-		p.Peer(), p.localKeyExpiration.Format(time.RFC3339), p.localKey)
+	slog.Info("Authentication successful",
+		"peer", p.Peer(),
+		"expiration", p.localKeyExpiration.Format(time.RFC3339),
+		"local_key", fmt.Sprintf("%x", p.localKey))
 
 	return nil
 }
@@ -816,7 +816,7 @@ func (l *LAN) alive() bool {
 
 	// Use connection expiration if set
 	if !l.connectionExpiration.IsZero() && time.Now().UTC().After(l.connectionExpiration) {
-		logger.Printf("Connection to %s has expired.", l.protocol.Peer())
+		slog.Warn("Connection has expired", "peer", l.protocol.Peer())
 		return false
 	}
 
@@ -826,7 +826,7 @@ func (l *LAN) alive() bool {
 // Connect establishes a connection to the device
 // Note: This function does NOT acquire the mutex lock. Callers must hold l.mu.Lock().
 func (l *LAN) connect() error {
-	logger.Printf("Creating new connection to %s:%d.", l.ip, l.port)
+	slog.Info("Creating new connection", "ip", l.ip, "port", l.port)
 
 	// Connect with timeout
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", l.ip, l.port), 5*time.Second)
@@ -924,7 +924,7 @@ func (l *LAN) Authenticate(token Token, key Key, retries int) error {
 		return &ProtocolError{Message: "protocol V3 is nil"}
 	}
 
-	logger.Printf("Authenticating with %s.", l.protocol.Peer())
+	slog.Info("Authenticating", "peer", l.protocol.Peer())
 
 	// Attempt to authenticate
 	for retries > 0 {
@@ -942,7 +942,7 @@ func (l *LAN) Authenticate(token Token, key Key, retries int) error {
 		// Handle timeout
 		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 			if retries > 1 {
-				logger.Printf("Authentication timeout. Resending to %s.", l.protocol.Peer())
+				slog.Warn("Authentication timeout, resending", "peer", l.protocol.Peer())
 				retries--
 			} else {
 				l.disconnect()
@@ -1093,7 +1093,7 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 			if isConnectionError {
 				l.disconnect()
 				if retries > 1 {
-					logger.Printf("Connection error. Retrying to %s.", l.protocol.Peer())
+					slog.Warn("Connection error, retrying", "peer", l.protocol.Peer())
 					retries--
 					continue
 				}
