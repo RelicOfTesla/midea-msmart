@@ -23,8 +23,8 @@ var version = "1.0.0"
 
 // DeviceType string constants for CLI
 const (
-	DeviceTypeAC = "AC"  // Air Conditioner (空调)
-	DeviceTypeCC = "CC"  // Commercial Air Conditioner (商业空调)
+	DeviceTypeAC = "AC" // Air Conditioner (空调)
+	DeviceTypeCC = "CC" // Commercial Air Conditioner (商业空调)
 )
 
 // deviceTypeMap maps CLI device type strings to msmart DeviceType
@@ -103,9 +103,15 @@ func main() {
 // 使用 lambda 表达式封装参数访问
 func parseCommand() func(int) string {
 	pflag.Parse()
-	args := pflag.Args()
+	fullArgs := pflag.Args()
+	args := make([]string, 0, len(fullArgs))
+	for _, arg := range fullArgs {
+		if !strings.HasPrefix(arg, "-") {
+			args = append(args, arg)
+		}
+	}
 	return func(i int) string {
-		if i < len(args) {
+		if i >= 0 && i < len(args) {
 			return args[i]
 		}
 		return ""
@@ -631,7 +637,7 @@ func getDevice(configPath, identifier string, deviceTypeStr string) (*config.Dev
 			if err != nil {
 				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
-			
+
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
 				fmt.Println("✅ 已认证，复用现有连接")
@@ -693,7 +699,7 @@ func getDeviceDirect(host string, deviceID int, tokenStr, keyStr string, deviceT
 			if err != nil {
 				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
-			
+
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
 				fmt.Println("✅ 已认证，复用现有连接")
@@ -720,11 +726,11 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 
 	// Discover the device
 	discoverConfig := &msmart.DiscoverConfig{
-		Target:          identifier,
-		Timeout:         5 * time.Second,
+		Target:           identifier,
+		Timeout:          5 * time.Second,
 		DiscoveryPackets: 3,
-		AutoConnect:      true, // Enable auto-connect to get token/key
-		Region:          msmart.DefaultCloudRegion, // Use default region for default credentials
+		AutoConnect:      true,                      // Enable auto-connect to get token/key
+		Region:           msmart.DefaultCloudRegion, // Use default region for default credentials
 	}
 
 	devices, err := msmart.Discover(ctx, discoverConfig)
@@ -852,7 +858,7 @@ func getDeviceAuto(identifier string, configPath string, deviceTypeStr string) (
 			if err != nil {
 				return nil, nil, fmt.Errorf("无效的Key: %w", err)
 			}
-			
+
 			// Check if already authenticated (reuse cached connection)
 			if acDevice.IsAuthenticated() {
 				fmt.Println("✅ 已认证，复用现有连接")
@@ -1487,7 +1493,6 @@ func handleQuery(configPath string, flags *GlobalFlags, deviceTypeStr string, id
 	return nil
 }
 
-
 func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
 	fmt.Println()
 
@@ -1579,8 +1584,8 @@ func handleDownload(configPath string, flags *GlobalFlags, host string) error {
 
 	// Discover the device (no auto-connect, we just need SN)
 	discoverConfig := &msmart.DiscoverConfig{
-		Target:          host,
-		Timeout:         5 * time.Second,
+		Target:           host,
+		Timeout:          5 * time.Second,
 		DiscoveryPackets: 3,
 		AutoConnect:      false, // Don't connect, just discover
 	}
