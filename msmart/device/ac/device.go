@@ -64,6 +64,26 @@ func (FanSpeed) GetFromValue(value int) FanSpeed {
 	return FanSpeedDefault
 }
 
+// GetFromName returns the FanSpeed for a given name, or the default if not found
+func (FanSpeed) GetFromName(name string) FanSpeed {
+	switch name {
+	case "AUTO":
+		return FanSpeedAuto
+	case "MAX":
+		return FanSpeedMax
+	case "HIGH":
+		return FanSpeedHigh
+	case "MEDIUM":
+		return FanSpeedMedium
+	case "LOW":
+		return FanSpeedLow
+	case "SILENT":
+		return FanSpeedSilent
+	default:
+		return FanSpeedDefault
+	}
+}
+
 // OperationalMode represents operational mode enum
 type OperationalMode int
 
@@ -116,6 +136,26 @@ func (OperationalMode) GetFromValue(value int) OperationalMode {
 	return OperationalModeDefault
 }
 
+// GetFromName returns the OperationalMode for a given name, or the default if not found
+func (OperationalMode) GetFromName(name string) OperationalMode {
+	switch name {
+	case "AUTO":
+		return OperationalModeAuto
+	case "COOL":
+		return OperationalModeCool
+	case "DRY":
+		return OperationalModeDry
+	case "HEAT":
+		return OperationalModeHeat
+	case "FAN_ONLY":
+		return OperationalModeFanOnly
+	case "SMART_DRY":
+		return OperationalModeSmartDry
+	default:
+		return OperationalModeDefault
+	}
+}
+
 // SwingMode represents swing mode enum
 type SwingMode int
 
@@ -159,6 +199,22 @@ func (SwingMode) GetFromValue(value int) SwingMode {
 		}
 	}
 	return SwingModeDefault
+}
+
+// GetFromName returns the SwingMode for a given name, or the default if not found
+func (SwingMode) GetFromName(name string) SwingMode {
+	switch name {
+	case "OFF":
+		return SwingModeOff
+	case "VERTICAL":
+		return SwingModeVertical
+	case "HORIZONTAL":
+		return SwingModeHorizontal
+	case "BOTH":
+		return SwingModeBoth
+	default:
+		return SwingModeDefault
+	}
 }
 
 // SwingAngle represents swing angle enum
@@ -213,6 +269,26 @@ func (SwingAngle) GetFromValue(value int) SwingAngle {
 	return SwingAngleDefault
 }
 
+// GetFromName returns the SwingAngle for a given name, or the default if not found
+func (SwingAngle) GetFromName(name string) SwingAngle {
+	switch name {
+	case "OFF":
+		return SwingAngleOff
+	case "POS_1":
+		return SwingAnglePos1
+	case "POS_2":
+		return SwingAnglePos2
+	case "POS_3":
+		return SwingAnglePos3
+	case "POS_4":
+		return SwingAnglePos4
+	case "POS_5":
+		return SwingAnglePos5
+	default:
+		return SwingAngleDefault
+	}
+}
+
 // CascadeMode represents cascade mode enum
 type CascadeMode int
 
@@ -251,6 +327,20 @@ func (CascadeMode) GetFromValue(value int) CascadeMode {
 		}
 	}
 	return CascadeModeDefault
+}
+
+// GetFromName returns the CascadeMode for a given name, or the default if not found
+func (CascadeMode) GetFromName(name string) CascadeMode {
+	switch name {
+	case "OFF":
+		return CascadeModeOff
+	case "UP":
+		return CascadeModeUp
+	case "DOWN":
+		return CascadeModeDown
+	default:
+		return CascadeModeDefault
+	}
 }
 
 // RateSelect represents rate select enum
@@ -316,6 +406,30 @@ func (RateSelect) GetFromValue(value int) RateSelect {
 	return RateSelectDefault
 }
 
+// GetFromName returns the RateSelect for a given name, or the default if not found
+func (RateSelect) GetFromName(name string) RateSelect {
+	switch name {
+	case "OFF":
+		return RateSelectOff
+	case "GEAR_50":
+		return RateSelectGear50
+	case "GEAR_75":
+		return RateSelectGear75
+	case "LEVEL_1":
+		return RateSelectLevel1
+	case "LEVEL_2":
+		return RateSelectLevel2
+	case "LEVEL_3":
+		return RateSelectLevel3
+	case "LEVEL_4":
+		return RateSelectLevel4
+	case "LEVEL_5":
+		return RateSelectLevel5
+	default:
+		return RateSelectDefault
+	}
+}
+
 // BreezeMode represents breeze mode enum
 type BreezeMode int
 
@@ -361,6 +475,22 @@ func (BreezeMode) GetFromValue(value int) BreezeMode {
 	return BreezeModeDefault
 }
 
+// GetFromName returns the BreezeMode for a given name, or the default if not found
+func (BreezeMode) GetFromName(name string) BreezeMode {
+	switch name {
+	case "OFF":
+		return BreezeModeOff
+	case "BREEZE_AWAY":
+		return BreezeModeBreezeAway
+	case "BREEZE_MILD":
+		return BreezeModeBreezeMild
+	case "BREEZELESS":
+		return BreezeModeBreezeless
+	default:
+		return BreezeModeDefault
+	}
+}
+
 // AuxHeatMode represents aux heat mode enum
 type AuxHeatMode int
 
@@ -399,6 +529,20 @@ func (AuxHeatMode) GetFromValue(value int) AuxHeatMode {
 		}
 	}
 	return AuxHeatModeDefault
+}
+
+// GetFromName returns the AuxHeatMode for a given name, or the default if not found
+func (AuxHeatMode) GetFromName(name string) AuxHeatMode {
+	switch name {
+	case "OFF":
+		return AuxHeatModeOff
+	case "AUX_HEAT":
+		return AuxHeatModeAuxHeat
+	case "AUX_ONLY":
+		return AuxHeatModeAuxOnly
+	default:
+		return AuxHeatModeDefault
+	}
 }
 
 // EnergyDataFormat represents energy data format enum
@@ -544,6 +688,54 @@ func (c Capability) String() string {
 		flags = append(flags, "SELF_CLEAN")
 	}
 	return fmt.Sprintf("%v", flags)
+}
+
+// GetFromName returns the Capability flag for a given name, or 0 if not found
+func (Capability) GetFromName(name string) Capability {
+	switch name {
+	case "CUSTOM_FAN_SPEED":
+		return CapabilityCustomFanSpeed
+	case "ECO":
+		return CapabilityEco
+	case "FREEZE_PROTECTION":
+		return CapabilityFreezeProtection
+	case "IECO":
+		return CapabilityIECO
+	case "TURBO":
+		return CapabilityTurbo
+	case "DISPLAY_CONTROL":
+		return CapabilityDisplayControl
+	case "ENERGY_STATS":
+		return CapabilityEnergyStats
+	case "FILTER_REMINDER":
+		return CapabilityFilterReminder
+	case "HUMIDITY":
+		return CapabilityHumidity
+	case "TARGET_HUMIDITY":
+		return CapabilityTargetHumidity
+	case "SWING_HORIZONTAL_ANGLE":
+		return CapabilitySwingHorizontalAngle
+	case "SWING_VERTICAL_ANGLE":
+		return CapabilitySwingVerticalAngle
+	case "BREEZE_AWAY":
+		return CapabilityBreezeAway
+	case "BREEZE_CONTROL":
+		return CapabilityBreezeControl
+	case "BREEZELESS":
+		return CapabilityBreezeless
+	case "CASCADE":
+		return CapabilityCascade
+	case "JET_COOL":
+		return CapabilityJetCool
+	case "OUT_SILENT":
+		return CapabilityOutSilent
+	case "PURIFIER":
+		return CapabilityPurifier
+	case "SELF_CLEAN":
+		return CapabilitySelfClean
+	default:
+		return Capability(0)
+	}
 }
 
 // AirConditioner represents an air conditioner device
@@ -710,7 +902,7 @@ func NewAirConditioner(ip string, port int, deviceID int, opts ...msmart.DeviceO
 		"supported_fan_speeds":     {AttrName: "supportedFanSpeeds", ValueType: reflect.TypeOf(FanSpeed(0))},
 		"supported_aux_modes":      {AttrName: "supportedAuxModes", ValueType: reflect.TypeOf(AuxHeatMode(0))},
 		"supported_rate_selects":   {AttrName: "supportedRateSelects", ValueType: reflect.TypeOf(RateSelect(0))},
-		"additional_capabilities":  {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0))},
+		"additional_capabilities":  {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0)), IsFlag: true},
 	})
 
 	return ac
@@ -1224,7 +1416,7 @@ func (ac *AirConditioner) applyProperties(ctx context.Context, properties map[Pr
 // This is the Go equivalent of Python's apply method
 func (ac *AirConditioner) Apply(ctx context.Context) error {
 	// Warn if trying to apply unsupported modes
-	if !containsOpMode(ac.supportedOpModes, ac.operationalMode) {
+	if !msmart.Contains(ac.supportedOpModes, ac.operationalMode) {
 		slog.Warn("Device is not capable of operational mode", "id", ac.GetID(), "mode", ac.operationalMode)
 	}
 
@@ -1232,7 +1424,7 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 		slog.Warn("Device is not capable of fan speed", "id", ac.GetID(), "speed", ac.fanSpeed)
 	}
 
-	if !containsSwingMode(ac.supportedSwingModes, ac.swingMode) {
+	if !msmart.Contains(ac.supportedSwingModes, ac.swingMode) {
 		slog.Warn("Device is not capable of swing mode", "id", ac.GetID(), "mode", ac.swingMode)
 	}
 
@@ -1248,11 +1440,11 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 		slog.Warn("Device is not capable of freeze protection", "id", ac.GetID())
 	}
 
-	if ac.rateSelect != RateSelectOff && !containsRateSelect(ac.supportedRateSelects, ac.rateSelect) {
+	if ac.rateSelect != RateSelectOff && !msmart.Contains(ac.supportedRateSelects, ac.rateSelect) {
 		slog.Warn("Device is not capable of rate select", "id", ac.GetID(), "rate", ac.rateSelect)
 	}
 
-	if ac.auxMode != AuxHeatModeOff && !containsAuxMode(ac.supportedAuxModes, ac.auxMode) {
+	if ac.auxMode != AuxHeatModeOff && !msmart.Contains(ac.supportedAuxModes, ac.auxMode) {
 		slog.Warn("Device is not capable of aux mode", "mode", ac.auxMode)
 	}
 
@@ -2645,46 +2837,6 @@ func toInt(v interface{}) int {
 	default:
 		return 0
 	}
-}
-
-// containsOpMode checks if an operation mode is in a slice
-func containsOpMode(modes []OperationalMode, mode OperationalMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
-}
-
-// containsSwingMode checks if a swing mode is in a slice
-func containsSwingMode(modes []SwingMode, mode SwingMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
-}
-
-// containsRateSelect checks if a rate select is in a slice
-func containsRateSelect(rates []RateSelect, rate RateSelect) bool {
-	for _, r := range rates {
-		if r == rate {
-			return true
-		}
-	}
-	return false
-}
-
-// containsAuxMode checks if an aux mode is in a slice
-func containsAuxMode(modes []AuxHeatMode, mode AuxHeatMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
 }
 
 // bytePtrToIntPtr converts a *byte to *int

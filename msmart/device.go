@@ -53,6 +53,7 @@ type Device struct {
 type CapabilityOverrideInfo struct {
 	AttrName  string
 	ValueType reflect.Type
+	IsFlag    bool // true if this is a Flag type (bitwise OR merging)
 }
 
 // DeviceOption is a functional option for Device configuration
@@ -419,6 +420,13 @@ func serialize(value interface{}) interface{} {
 	return value
 }
 
+// EnumNameResolver is an interface for enum types that support name-to-value resolution
+// This allows OverrideCapabilities to convert string names to enum values
+type EnumNameResolver interface {
+	// GetFromNameWithDefault returns the enum value for a given name, or the default if not found
+	GetFromNameWithDefault(name string, default_ interface{}) interface{}
+}
+
 // OverrideCapabilities overrides device capabilities via serialized dict
 // This is the equivalent of Python's override_capabilities method
 func (d *Device) OverrideCapabilities(overrides map[string]interface{}, merge bool) error {
@@ -454,25 +462,310 @@ func (d *Device) OverrideCapabilities(overrides map[string]interface{}, merge bo
 			continue
 		}
 
-		// Handle enum/flag overrides (simplified for Go)
-		// In Python, this uses issubclass(value_type, Enum)
-		// In Go, we'd need a different approach for enums
-		// This is a simplified version
+		// Handle enum/flag overrides
+		// Value should be a list of enum names
 		sliceVal, ok := value.([]interface{})
 		if !ok {
-			return fmt.Errorf("'%s' must be a list", key)
+			// Also accept []string directly
+			if strSlice, ok := value.([]string); ok {
+				sliceVal = make([]interface{}, len(strSlice))
+				for i, s := range strSlice {
+					sliceVal[i] = s
+				}
+			} else {
+				return fmt.Errorf("'%s' must be a list", key)
+			}
 		}
 
-		// For simplicity, we just set the slice value
-		// The original Python code has more complex enum handling
+		// Get the field for potential merge
 		rv := reflect.ValueOf(d).Elem()
 		field := rv.FieldByName(attrName)
-		if field.IsValid() && field.CanSet() {
-			field.Set(reflect.ValueOf(sliceVal))
+
+		// Handle Flag types (bitwise OR merging)
+		if overrideInfo.IsFlag {
+			if err := d.applyFlagOverride(attrName, valueType, sliceVal, merge, field); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Handle regular enum types
+		if err := d.applyEnumOverride(attrName, valueType, sliceVal, merge, field); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// applyFlagOverride handles Flag enum types with bitwise OR merging
+func (d *Device) applyFlagOverride(attrName string, valueType reflect.Type, names []interface{}, merge bool, field reflect.Value) error {
+	// Convert names to flag values using reflection
+	// We need to find the GetFromName method on the type
+	flags := reflect.New(valueType).Elem()
+
+	// Get the zero value and FindByName method
+	zeroValue := reflect.Zero(valueType)
+
+	// Look for GetFromName method (case insensitive match)
+	getFromNameMethod := zeroValue.MethodByName("GetFromName")
+	if !getFromNameMethod.IsValid() {
+		// Try to find Values method and then match by String()
+		valuesMethod := zeroValue.MethodByName("Values")
+		if valuesMethod.IsValid() {
+			// Use Values() to find matching names
+			allValues := valuesMethod.Call(nil)[0]
+
+			for _, name := range names {
+				nameStr, ok := name.(string)
+				if !ok {
+					return fmt.Errorf("flag name must be a string")
+				}
+
+				found := false
+				for i := 0; i < allValues.Len(); i++ {
+					v := allValues.Index(i)
+					stringMethod := v.MethodByName("String")
+					if stringMethod.IsValid() {
+						strVal := stringMethod.Call(nil)[0].String()
+						if strVal == nameStr {
+							// Found matching value, OR it into flags
+							flags = reflect.ValueOf(flags.Int() | v.Int())
+							found = true
+							break
+						}
+					}
+				}
+
+				if !found {
+					return fmt.Errorf("invalid value '%s' for flag type", nameStr)
+				}
+			}
+		} else {
+			return fmt.Errorf("unsupported flag type for '%s'", attrName)
+		}
+	} else {
+		// Use GetFromName method, but also validate using Values()
+		// We need Values() to validate that the name is actually valid
+		valuesMethod := zeroValue.MethodByName("Values")
+		if !valuesMethod.IsValid() {
+			// No Values() method, just use GetFromName without validation
+			for _, name := range names {
+				nameStr, ok := name.(string)
+				if !ok {
+					return fmt.Errorf("flag name must be a string")
+				}
+
+				// Call GetFromName(name)
+				result := getFromNameMethod.Call([]reflect.Value{reflect.ValueOf(nameStr)})
+				if len(result) > 0 {
+					flags = reflect.ValueOf(flags.Int() | result[0].Int())
+				}
+			}
+		} else {
+			// Use Values() to validate names, then GetFromName to get values
+			allValues := valuesMethod.Call(nil)[0]
+
+			for _, name := range names {
+				nameStr, ok := name.(string)
+				if !ok {
+					return fmt.Errorf("flag name must be a string")
+				}
+
+				// First validate that the name exists by checking String() values
+				found := false
+				for i := 0; i < allValues.Len(); i++ {
+					v := allValues.Index(i)
+					stringMethod := v.MethodByName("String")
+					if stringMethod.IsValid() {
+						strVal := stringMethod.Call(nil)[0].String()
+						if strVal == nameStr {
+							found = true
+							break
+						}
+					}
+				}
+
+				if !found {
+					return fmt.Errorf("invalid value '%s' for flag type", nameStr)
+				}
+
+				// Now call GetFromName to get the value
+				result := getFromNameMethod.Call([]reflect.Value{reflect.ValueOf(nameStr)})
+				if len(result) > 0 {
+					flags = reflect.ValueOf(flags.Int() | result[0].Int())
+				}
+			}
+		}
+	}
+
+	// Handle merge with existing flags
+	if merge {
+		// Check if field is a CapabilityManager
+		if field.IsValid() && field.Type() == reflect.TypeOf(&CapabilityManager{}) {
+			if !field.IsNil() {
+				cm := field.Interface().(*CapabilityManager)
+				existingFlags := cm.Flags()
+				flags = reflect.ValueOf(flags.Int() | existingFlags)
+			}
+		} else if field.IsValid() && field.CanSet() {
+			flags = reflect.ValueOf(flags.Int() | field.Int())
+		}
+	}
+
+	// Set the flags
+	if field.IsValid() {
+		// Check if field is a CapabilityManager
+		if field.Type() == reflect.TypeOf(&CapabilityManager{}) {
+			if field.IsNil() {
+				field.Set(reflect.ValueOf(NewCapabilityManager(flags.Int())))
+			} else {
+				cm := field.Interface().(*CapabilityManager)
+				cm.SetFlags(flags.Int())
+			}
+		} else if field.CanSet() {
+			field.SetInt(flags.Int())
+		}
+	}
+
+	return nil
+}
+
+// applyEnumOverride handles regular enum types
+func (d *Device) applyEnumOverride(attrName string, valueType reflect.Type, names []interface{}, merge bool, field reflect.Value) error {
+	// Convert names to enum values using reflection
+	var members []interface{}
+
+	// Get the zero value and try to find a lookup method
+	zeroValue := reflect.Zero(valueType)
+
+	// Look for GetFromName method
+	getFromNameMethod := zeroValue.MethodByName("GetFromName")
+	if !getFromNameMethod.IsValid() {
+		// Try to find Values method and then match by String()
+		valuesMethod := zeroValue.MethodByName("Values")
+		if !valuesMethod.IsValid() {
+			return fmt.Errorf("unsupported enum type for '%s'", attrName)
+		}
+
+		// Use Values() to find matching names
+		allValues := valuesMethod.Call(nil)[0]
+
+		for _, name := range names {
+			nameStr, ok := name.(string)
+			if !ok {
+				return fmt.Errorf("enum name must be a string")
+			}
+
+			found := false
+			for i := 0; i < allValues.Len(); i++ {
+				v := allValues.Index(i)
+				stringMethod := v.MethodByName("String")
+				if stringMethod.IsValid() {
+					strVal := stringMethod.Call(nil)[0].String()
+					if strVal == nameStr {
+						members = append(members, v.Interface())
+						found = true
+						break
+					}
+				}
+			}
+
+			if !found {
+				return fmt.Errorf("invalid value '%s' for enum type '%s'", nameStr, attrName)
+			}
+		}
+	} else {
+		// Use GetFromName method, but also validate using Values()
+		// We need Values() to validate that the name is actually valid
+		valuesMethod := zeroValue.MethodByName("Values")
+		if !valuesMethod.IsValid() {
+			// No Values() method, just use GetFromName without validation
+			for _, name := range names {
+				nameStr, ok := name.(string)
+				if !ok {
+					return fmt.Errorf("enum name must be a string")
+				}
+
+				// Call GetFromName(name)
+				result := getFromNameMethod.Call([]reflect.Value{reflect.ValueOf(nameStr)})
+				if len(result) > 0 {
+					members = append(members, result[0].Interface())
+				}
+			}
+		} else {
+			// Use Values() to validate names, then GetFromName to get values
+			allValues := valuesMethod.Call(nil)[0]
+
+			for _, name := range names {
+				nameStr, ok := name.(string)
+				if !ok {
+					return fmt.Errorf("enum name must be a string")
+				}
+
+				// First validate that the name exists by checking String() values
+				found := false
+				for i := 0; i < allValues.Len(); i++ {
+					v := allValues.Index(i)
+					stringMethod := v.MethodByName("String")
+					if stringMethod.IsValid() {
+						strVal := stringMethod.Call(nil)[0].String()
+						if strVal == nameStr {
+							found = true
+							break
+						}
+					}
+				}
+
+				if !found {
+					return fmt.Errorf("invalid value '%s' for enum type '%s'", nameStr, attrName)
+				}
+
+				// Now call GetFromName to get the value
+				result := getFromNameMethod.Call([]reflect.Value{reflect.ValueOf(nameStr)})
+				if len(result) > 0 {
+					members = append(members, result[0].Interface())
+				}
+			}
+		}
+	}
+
+	// Handle merge with existing values
+	if merge && field.IsValid() {
+		// Get existing slice values
+		if field.Kind() == reflect.Slice {
+			for i := 0; i < field.Len(); i++ {
+				members = append(members, field.Index(i).Interface())
+			}
+			// Remove duplicates (simple approach)
+			members = uniqueInterfaceSlice(members)
+		}
+	}
+
+	// Create a slice of the correct type and set it
+	if field.IsValid() && field.CanSet() {
+		sliceType := reflect.SliceOf(valueType)
+		slice := reflect.MakeSlice(sliceType, len(members), len(members))
+		for i, m := range members {
+			slice.Index(i).Set(reflect.ValueOf(m))
+		}
+		field.Set(slice)
+	}
+
+	return nil
+}
+
+// uniqueInterfaceSlice removes duplicate values from a slice
+func uniqueInterfaceSlice(slice []interface{}) []interface{} {
+	keys := make(map[interface{}]bool)
+	result := []interface{}{}
+	for _, v := range slice {
+		if !keys[v] {
+			keys[v] = true
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 // toFloat attempts to convert a value to float64

@@ -5,6 +5,17 @@ import (
 	"log/slog"
 )
 
+// Contains checks if a slice contains an element.
+// This is a generic helper that works with any comparable type.
+func Contains[T comparable](slice []T, item T) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
 // CapabilityManager is a minimal wrapper class to make mutable capability flags.
 // In Go, we use a struct with methods instead of a class.
 // Since Go doesn't have Python's Flag enum type, we use int64 for flexibility.

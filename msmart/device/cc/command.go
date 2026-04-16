@@ -6,10 +6,14 @@ package cc
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"sync"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
+
+// Logger for the package
+var ccLogger = log.Default()
 
 // Package-level message ID counter (like Python class variable)
 // Thread-safe with mutex
@@ -56,6 +60,21 @@ const (
 	ControlIdDisplay           ControlId = 0x0040
 	ControlIdAuxMode           ControlId = 0x0043  // Untested
 )
+
+// IsKnown checks if the ControlId is a known/defined value.
+// Returns true if the control ID matches one of the defined constants.
+func (c ControlId) IsKnown() bool {
+	switch c {
+	case ControlIdPower, ControlIdTargetTemperature, ControlIdTemperatureUnit,
+		ControlIdTargetHumidity, ControlIdMode, ControlIdFanSpeed,
+		ControlIdVertSwingAngle, ControlIdHorzSwingAngle, ControlIdWindSense,
+		ControlIdEco, ControlIdSilent, ControlIdSleep, ControlIdSelfClean,
+		ControlIdPurifier, ControlIdBeep, ControlIdDisplay, ControlIdAuxMode:
+		return true
+	default:
+		return false
+	}
+}
 
 // Decode decodes raw control data into a convenient form.
 // In Python: def decode(self, data: bytes) -> Any
@@ -550,6 +569,11 @@ func (r *ControlResponse) parse(payload []byte) error {
 
 		// Convert ID to enumerate type
 		control := ControlId(rawId)
+
+		// Check if control ID is known and log warning if not
+		if !control.IsKnown() {
+			ccLogger.Printf("Warning: Unknown control ID 0x%04X, Size: %d.", rawId, size)
+		}
 
 		// Parse the property
 		if len(payload) >= 4+int(size) {

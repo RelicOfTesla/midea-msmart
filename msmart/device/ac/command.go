@@ -163,63 +163,89 @@ func (p PropertyId) Encode(args ...interface{}) ([]byte, error) {
 		return nil, fmt.Errorf("%v encode is not supported", p)
 	}
 
-	switch p {
-	case PropertyIdBreezeAway:
-		if len(args) > 0 {
-			if b, ok := args[0].(bool); ok {
-				if b {
-					return []byte{2}, nil
-				}
-				return []byte{1}, nil
-			}
-		}
-	case PropertyIdCascade:
-		// data[0] - wind_around, data[1] - wind_around_ud
-		if len(args) > 0 {
-			if b, ok := args[0].(bool); ok {
-				if b {
-					return []byte{1, 1}, nil
-				}
-				return []byte{0, 0}, nil
-			}
-		}
-	case PropertyIdIECO:
-		// ieco_frame, ieco_number, ieco_switch, ...
-		if len(args) > 0 {
-			if b, ok := args[0].(bool); ok {
-				if b {
-					return append([]byte{0, 1, 1}, make([]byte, 10)...), nil
-				}
-				return append([]byte{0, 1, 0}, make([]byte, 10)...), nil
-			}
-		}
-	case PropertyIdOutSilent:
-		if len(args) > 0 {
-			if b, ok := args[0].(bool); ok {
-				if b {
-					return []byte{3}, nil
-				}
-				return []byte{0}, nil
-			}
-		}
-	default:
-		if len(args) > 0 {
-			if b, ok := args[0].(byte); ok {
-				return []byte{b}, nil
-			}
-			if b, ok := args[0].(int); ok {
-				return []byte{byte(b)}, nil
-			}
-			if b, ok := args[0].(bool); ok {
-				if b {
-					return []byte{1}, nil
-				}
-				return []byte{0}, nil
-			}
-		}
+	if len(args) == 0 {
+		return nil, fmt.Errorf("%v encode requires at least one argument", p)
 	}
 
-	return []byte{}, nil
+	switch p {
+	case PropertyIdBreezeAway:
+		// Accept bool or int (like Python)
+		if b, ok := args[0].(bool); ok {
+			if b {
+				return []byte{2}, nil
+			}
+			return []byte{1}, nil
+		}
+		if i, ok := args[0].(int); ok {
+			if i != 0 {
+				return []byte{2}, nil
+			}
+			return []byte{1}, nil
+		}
+		return nil, fmt.Errorf("%v encode requires bool or int argument, got %T", p, args[0])
+
+	case PropertyIdCascade:
+		// data[0] - wind_around, data[1] - wind_around_ud
+		// Python: bytes([1 if args[0] else 0, args[0]])
+		if b, ok := args[0].(bool); ok {
+			if b {
+				return []byte{1, 1}, nil
+			}
+			return []byte{0, 0}, nil
+		}
+		if i, ok := args[0].(int); ok {
+			if i != 0 {
+				return []byte{1, byte(i)}, nil
+			}
+			return []byte{0, 0}, nil
+		}
+		return nil, fmt.Errorf("%v encode requires bool or int argument, got %T", p, args[0])
+
+	case PropertyIdIECO:
+		// ieco_frame, ieco_number, ieco_switch, ...
+		// Python: bytes([0, 1, args[0]]) + bytes(10)
+		if b, ok := args[0].(bool); ok {
+			if b {
+				return append([]byte{0, 1, 1}, make([]byte, 10)...), nil
+			}
+			return append([]byte{0, 1, 0}, make([]byte, 10)...), nil
+		}
+		if i, ok := args[0].(int); ok {
+			return append([]byte{0, 1, byte(i)}, make([]byte, 10)...), nil
+		}
+		return nil, fmt.Errorf("%v encode requires bool or int argument, got %T", p, args[0])
+
+	case PropertyIdOutSilent:
+		if b, ok := args[0].(bool); ok {
+			if b {
+				return []byte{3}, nil
+			}
+			return []byte{0}, nil
+		}
+		if i, ok := args[0].(int); ok {
+			if i != 0 {
+				return []byte{3}, nil
+			}
+			return []byte{0}, nil
+		}
+		return nil, fmt.Errorf("%v encode requires bool or int argument, got %T", p, args[0])
+
+	default:
+		// Python: bytes(args[0:1]) - converts first arg to a single byte
+		if b, ok := args[0].(byte); ok {
+			return []byte{b}, nil
+		}
+		if b, ok := args[0].(int); ok {
+			return []byte{byte(b)}, nil
+		}
+		if b, ok := args[0].(bool); ok {
+			if b {
+				return []byte{1}, nil
+			}
+			return []byte{0}, nil
+		}
+		return nil, fmt.Errorf("%v encode requires byte, int, or bool argument, got %T", p, args[0])
+	}
 }
 
 // TemperatureType represents temperature type enum

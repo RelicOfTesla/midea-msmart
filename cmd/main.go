@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -32,6 +33,28 @@ var deviceTypeMap = map[string]msmart.DeviceType{
 	DeviceTypeCC: msmart.DeviceTypeCommercialAC,
 }
 
+// Global flags
+var (
+	region      string
+	deviceType  string
+	deviceID    int
+	deviceToken string
+	deviceKey   string
+	verbose     bool
+)
+
+func init() {
+	flag.StringVar(&region, "region", msmart.DefaultCloudRegion, "Cloud region (CN, US, EU)")
+	flag.StringVar(&deviceType, "device_type", "AC", "Device type (AC, CC)")
+	flag.IntVar(&deviceID, "id", 0, "Device ID for V3 devices")
+	flag.StringVar(&deviceToken, "token", "", "Auth token for V3 devices")
+	flag.StringVar(&deviceKey, "key", "", "Auth key for V3 devices")
+	flag.BoolVar(&verbose, "verbose", false, "Verbose output")
+	flag.BoolVar(&verbose, "v", false, "Verbose output (shorthand)")
+
+	flag.Usage = printUsage
+}
+
 func main() {
 	if err := run(); err != nil {
 		// Error already printed by the handler
@@ -40,84 +63,27 @@ func main() {
 }
 
 func run() error {
-	// Check for global verbose flag
-	verbose := false
-	for _, arg := range os.Args {
-		if arg == "-v" || arg == "--verbose" {
-			verbose = true
-			msmart.Verbose = true
-			break
-		}
-	}
-	_ = verbose // Avoid unused variable warning
+	flag.Parse()
 
-	// Parse global --region flag
-	region := msmart.DefaultCloudRegion
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--region" && i+1 < len(os.Args) {
-			region = os.Args[i+1]
-			i++
-			break
-		}
+	if verbose {
+		msmart.Verbose = true
 	}
 
-	// Parse global --device_type flag
-	deviceTypeStr := DeviceTypeAC // Default to AC (Air Conditioner)
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--device_type" && i+1 < len(os.Args) {
-			deviceTypeStr = strings.ToUpper(os.Args[i+1])
-			// Validate device type
-			if _, ok := deviceTypeMap[deviceTypeStr]; !ok {
-				fmt.Printf("❌ 不支持的设备类型: %s\n", os.Args[i+1])
-				fmt.Println("   支持的设备类型: AC (空调), CC (商业空调)")
-				return fmt.Errorf("unsupported device type: %s", os.Args[i+1])
-			}
-			i++
-			break
-		}
+	// Validate device type
+	deviceTypeStr := strings.ToUpper(deviceType)
+	if _, ok := deviceTypeMap[deviceTypeStr]; !ok {
+		fmt.Printf("❌ 不支持的设备类型: %s\n", deviceType)
+		fmt.Println("   支持的设备类型: AC (空调), CC (商业空调)")
+		return fmt.Errorf("unsupported device type: %s", deviceType)
 	}
 
-	// Parse global --id flag (Device ID for V3 devices)
-	deviceID := 0
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--id" && i+1 < len(os.Args) {
-			id, err := strconv.Atoi(os.Args[i+1])
-			if err != nil {
-				fmt.Printf("❌ 无效的设备 ID: %s\n", os.Args[i+1])
-				return fmt.Errorf("invalid device ID: %s", os.Args[i+1])
-			}
-			deviceID = id
-			i++
-			break
-		}
-	}
-
-	// Parse global --token flag (Authentication token for V3 devices)
-	var deviceToken string
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--token" && i+1 < len(os.Args) {
-			deviceToken = os.Args[i+1]
-			i++
-			break
-		}
-	}
-
-	// Parse global --key flag (Authentication key for V3 devices)
-	var deviceKey string
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--key" && i+1 < len(os.Args) {
-			deviceKey = os.Args[i+1]
-			i++
-			break
-		}
-	}
-
-	if len(os.Args) < 2 {
+	args := flag.Args()
+	if len(args) < 1 {
 		printUsage()
 		return fmt.Errorf("no command provided")
 	}
 
-	command := os.Args[1]
+	command := args[0]
 	configPath := config.DefaultConfigPath()
 
 	// Commands that don't need config
@@ -137,52 +103,52 @@ func run() error {
 	case "list":
 		return handleList(configPath)
 	case "bind":
-		identifier, name := parseBindArgs(os.Args[2:])
+		identifier, name := parseBindArgs(args[1:])
 		return handleBind(configPath, identifier, name)
 	case "unbind":
-		identifier := parseUnbindArgs(os.Args[2:])
+		identifier := parseUnbindArgs(args[1:])
 		return handleUnbind(configPath, identifier)
 	case "status":
-		identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy := parseStatusArgs(os.Args[2:])
+		identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy := parseStatusArgs(args[1:])
 		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy)
 	case "on":
-		identifier, autoMode := parsePowerArgs(os.Args[2:])
+		identifier, autoMode := parsePowerArgs(args[1:])
 		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
 	case "off":
-		identifier, autoMode := parsePowerArgs(os.Args[2:])
+		identifier, autoMode := parsePowerArgs(args[1:])
 		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
 	case "temp":
-		identifier, temp, autoMode, err := parseTempArgs(os.Args[2:])
+		identifier, temp, autoMode, err := parseTempArgs(args[1:])
 		if err != nil {
 			return err
 		}
 		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, temp, autoMode)
 	case "mode":
-		identifier, mode, autoMode, err := parseModeArgs(os.Args[2:])
+		identifier, mode, autoMode, err := parseModeArgs(args[1:])
 		if err != nil {
 			return err
 		}
 		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, mode, autoMode)
 	case "fan":
-		identifier, speed, autoMode, err := parseFanArgs(os.Args[2:])
+		identifier, speed, autoMode, err := parseFanArgs(args[1:])
 		if err != nil {
 			return err
 		}
 		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, speed, autoMode)
 	case "swing":
-		identifier, swing, autoMode, err := parseSwingArgs(os.Args[2:])
+		identifier, swing, autoMode, err := parseSwingArgs(args[1:])
 		if err != nil {
 			return err
 		}
 		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, swing, autoMode)
 	case "set":
-		identifier, autoMode, temp, mode, fanSpeed, swingMode, power, err := parseSetArgs(os.Args[2:])
+		identifier, autoMode, temp, mode, fanSpeed, swingMode, power, err := parseSetArgs(args[1:])
 		if err != nil {
 			return err
 		}
 		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, temp, mode, fanSpeed, swingMode, power)
 	case "query":
-		identifier, key, showAll, autoMode := parseQueryArgs(os.Args[2:])
+		identifier, key, showAll, autoMode := parseQueryArgs(args[1:])
 		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, key, showAll, autoMode)
 	case "download":
 		return handleDownload(configPath, region)
@@ -1051,27 +1017,14 @@ func printACState(acDevice *ac.AirConditioner) {
 	var fanName string
 	switch fs := fanSpeed.(type) {
 	case ac.FanSpeed:
-		fanNames := map[ac.FanSpeed]string{
-			ac.FanSpeedAuto:   "自动",
-			ac.FanSpeedLow:    "低",
-			ac.FanSpeedMedium: "中",
-			ac.FanSpeedHigh:   "高",
-			ac.FanSpeedSilent: "静音",
-		}
-		fanName = fanNames[fs]
+		fanName = SpeedNames[fs]
 	default:
 		fanName = fmt.Sprintf("%v", fs)
 	}
 	fmt.Printf("║  风速: %-30s║\n", fanName)
 
 	// Swing mode
-	swingNames := map[ac.SwingMode]string{
-		ac.SwingModeOff:        "关闭",
-		ac.SwingModeVertical:   "上下摆风",
-		ac.SwingModeHorizontal: "左右摆风",
-		ac.SwingModeBoth:       "全方位摆风",
-	}
-	fmt.Printf("║  摆风: %-30s║\n", swingNames[acDevice.SwingMode()])
+	fmt.Printf("║  摆风: %-30s║\n", SwingNames[acDevice.SwingMode()])
 
 	// Additional features
 	if acDevice.Eco() {
@@ -1248,14 +1201,7 @@ func handleMode(configPath string, deviceTypeStr string, deviceID int, deviceTok
 		return err
 	}
 
-	modeNames := map[ac.OperationalMode]string{
-		ac.OperationalModeCool:    "制冷",
-		ac.OperationalModeHeat:    "制热",
-		ac.OperationalModeAuto:    "自动",
-		ac.OperationalModeDry:     "除湿",
-		ac.OperationalModeFanOnly: "送风",
-	}
-	fmt.Printf("✅ %s 模式已设置为 %s\n", device.Name, modeNames[mode])
+	fmt.Printf("✅ %s 模式已设置为 %s\n", device.Name, ModeNames[mode])
 	return nil
 }
 
@@ -1386,41 +1332,21 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	// Apply mode if specified
 	if mode != nil {
 		acDevice.SetOperationalMode(*mode)
-		modeNames := map[ac.OperationalMode]string{
-			ac.OperationalModeCool:    "制冷",
-			ac.OperationalModeHeat:    "制热",
-			ac.OperationalModeAuto:    "自动",
-			ac.OperationalModeDry:     "除湿",
-			ac.OperationalModeFanOnly: "送风",
-		}
-		changes = append(changes, fmt.Sprintf("模式 %s", modeNames[*mode]))
+		changes = append(changes, fmt.Sprintf("模式 %s", ModeNames[*mode]))
 		hasChanges = true
 	}
 
 	// Apply fan speed if specified
 	if fanSpeed != nil {
 		acDevice.SetFanSpeed(*fanSpeed)
-		fanNames := map[ac.FanSpeed]string{
-			ac.FanSpeedAuto:   "自动",
-			ac.FanSpeedLow:    "低",
-			ac.FanSpeedMedium: "中",
-			ac.FanSpeedHigh:   "高",
-			ac.FanSpeedSilent: "静音",
-		}
-		changes = append(changes, fmt.Sprintf("风速 %s", fanNames[*fanSpeed]))
+		changes = append(changes, fmt.Sprintf("风速 %s", SpeedNames[*fanSpeed]))
 		hasChanges = true
 	}
 
 	// Apply swing mode if specified
 	if swingMode != nil {
 		acDevice.SetSwingMode(*swingMode)
-		swingNames := map[ac.SwingMode]string{
-			ac.SwingModeOff:        "关闭",
-			ac.SwingModeVertical:   "上下摆风",
-			ac.SwingModeHorizontal: "左右摆风",
-			ac.SwingModeBoth:       "全方位摆风",
-		}
-		changes = append(changes, fmt.Sprintf("摆风 %s", swingNames[*swingMode]))
+		changes = append(changes, fmt.Sprintf("摆风 %s", SwingNames[*swingMode]))
 		hasChanges = true
 	}
 
@@ -1527,41 +1453,21 @@ func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
 		}
 
 	case "mode", "operational_mode":
-		modeNames := map[ac.OperationalMode]string{
-			ac.OperationalModeCool:    "制冷",
-			ac.OperationalModeHeat:    "制热",
-			ac.OperationalModeAuto:    "自动",
-			ac.OperationalModeDry:     "除湿",
-			ac.OperationalModeFanOnly: "送风",
-		}
-		fmt.Printf("🔄 运行模式: %s\n", modeNames[acDevice.OperationalMode()])
+		fmt.Printf("🔄 运行模式: %s\n", ModeNames[acDevice.OperationalMode()])
 
 	case "fan", "fan_speed":
 		fanSpeed := acDevice.FanSpeed()
 		var fanName string
 		switch fs := fanSpeed.(type) {
 		case ac.FanSpeed:
-			fanNames := map[ac.FanSpeed]string{
-				ac.FanSpeedAuto:   "自动",
-				ac.FanSpeedLow:    "低",
-				ac.FanSpeedMedium: "中",
-				ac.FanSpeedHigh:   "高",
-				ac.FanSpeedSilent: "静音",
-			}
-			fanName = fanNames[fs]
+			fanName = SpeedNames[fs]
 		default:
 			fanName = fmt.Sprintf("%v", fs)
 		}
 		fmt.Printf("🌀 风速: %s\n", fanName)
 
 	case "swing", "swing_mode":
-		swingNames := map[ac.SwingMode]string{
-			ac.SwingModeOff:        "关闭",
-			ac.SwingModeVertical:   "上下摆风",
-			ac.SwingModeHorizontal: "左右摆风",
-			ac.SwingModeBoth:       "全方位摆风",
-		}
-		fmt.Printf("🔀 摆风模式: %s\n", swingNames[acDevice.SwingMode()])
+		fmt.Printf("🔀 摆风模式: %s\n", SwingNames[acDevice.SwingMode()])
 
 	case "power", "power_state":
 		if powerState := acDevice.PowerState(); powerState != nil && *powerState {

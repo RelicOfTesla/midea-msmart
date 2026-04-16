@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
+	"github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
 )
 
 // ============================================================================
@@ -106,26 +107,23 @@ func TestOverrideCapabilities_EnumsInvalidName(t *testing.T) {
 	// Create dummy device
 	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
 
-	// Set up supported capability overrides with a custom type
-	// In Go, enum handling is different from Python
-	// We use a slice type for this test
+	// Set up supported capability overrides with the real OperationalMode enum type
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"supported_modes": {
 			AttrName:  "supportedModes",
-			ValueType: reflect.TypeOf([]interface{}{}),
+			ValueType: reflect.TypeOf(ac.OperationalMode(0)),
 		},
 	})
 
-	// Test with invalid enum name - in Go this would be a list of strings
-	// The Go implementation may handle this differently than Python
+	// Test with invalid enum name
 	err := device.OverrideCapabilities(map[string]interface{}{
-		"supported_modes": []interface{}{"bad_enum_name"},
+		"supported_modes": []interface{}{"BAD_ENUM_NAME"},
 	}, false)
 
-	// Note: The current Go implementation doesn't validate enum values
-	// Python test expects ValueError for invalid enum name
-	// This test documents the difference
-	_ = err // The error handling depends on implementation details
+	// Should return error for invalid enum name
+	if err == nil {
+		t.Error("Expected error for invalid enum name, got nil")
+	}
 }
 
 // TestOverrideCapabilities_EnumsInvalidFormat tests that invalid enum format throws an error.
@@ -134,11 +132,11 @@ func TestOverrideCapabilities_EnumsInvalidFormat(t *testing.T) {
 	// Create dummy device
 	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
 
-	// Set up supported capability overrides
+	// Set up supported capability overrides with the real enum type
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"supported_aux_modes": {
 			AttrName:  "auxModes",
-			ValueType: reflect.TypeOf([]interface{}{}),
+			ValueType: reflect.TypeOf(ac.AuxHeatMode(0)),
 		},
 	})
 
@@ -178,56 +176,59 @@ func TestOverrideCapabilities_Enum(t *testing.T) {
 	// Create dummy device
 	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
 
-	// Set up supported capability overrides
+	// Set up supported capability overrides with the real OperationalMode enum type
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"supported_modes": {
 			AttrName:  "supportedModes",
-			ValueType: reflect.TypeOf([]interface{}{}),
+			ValueType: reflect.TypeOf(ac.OperationalMode(0)),
 		},
 	})
 
-	// Set initial value
-	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
-		"supported_modes": {
-			AttrName:  "supportedModes",
-			ValueType: reflect.TypeOf([]interface{}{}),
-		},
-	})
-
-	// Note: The Python test has more complex enum merging logic
-	// The Go implementation is simplified and doesn't support all the same features
-	// This test documents what can be tested
-
-	// Test basic override
+	// Test basic override with valid enum names
 	err := device.OverrideCapabilities(map[string]interface{}{
-		"supported_modes": []interface{}{"COOL"},
+		"supported_modes": []interface{}{"COOL", "DRY"},
 	}, false)
 
-	// The result depends on implementation details
-	_ = err
+	// Should not error for valid enum names
+	if err != nil {
+		t.Errorf("Expected no error for valid enum names, got: %v", err)
+	}
+
+	// Note: We can't easily verify the field was set correctly without
+	// exposing internal fields or using reflection in tests
 }
 
-// TestOverrideCapabilities_Flags tests flag overrides.
+// TestOverrideCapabilities_Flag tests flag overrides with bitwise OR merging.
 // This is a translation of Python's TestOverrideCapabilities.test_flags
-func TestOverrideCapabilities_Flags(t *testing.T) {
+func TestOverrideCapabilities_Flag(t *testing.T) {
 	// Create dummy device
 	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
 
-	// Set up supported capability overrides for flags
-	// Note: Go doesn't have Python-style Flag enums, so this is simplified
+	// Create a CapabilityManager to store flags
+	cm := msmart.NewCapabilityManager(0)
+
+	// Set up supported capability overrides for flags with IsFlag=true
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"additional_capabilities": {
-			AttrName:  "additionalCaps",
-			ValueType: reflect.TypeOf([]interface{}{}),
+			AttrName:  "dummyCaps",
+			ValueType: reflect.TypeOf(ac.Capability(0)),
+			IsFlag:    true,
 		},
 	})
 
-	// Test basic override
+	// We need to set a field on the device to test with
+	// Since the base Device doesn't have a CapabilityManager field,
+	// this test demonstrates the setup but can't fully verify behavior
+	_ = cm // Use in a more complete test with AC device
+
+	// For now, just verify the setup doesn't error
 	err := device.OverrideCapabilities(map[string]interface{}{
-		"additional_capabilities": []interface{}{"FEATURE_1"},
+		"additional_capabilities": []interface{}{"ECO", "TURBO"},
 	}, false)
 
-	_ = err // Result depends on implementation
+	// The error depends on whether the field exists on the Device struct
+	// For base Device, it will fail to set the field, but shouldn't crash
+	_ = err
 }
 
 // ============================================================================

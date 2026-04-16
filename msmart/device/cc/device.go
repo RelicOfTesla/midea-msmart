@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
@@ -553,6 +554,19 @@ func NewCommercialAirConditioner(ip string, deviceID int, port int) *CommercialA
 		supportedAuxModes:      AuxHeatModeList(),
 	}
 
+	// Set supported capability overrides
+	// This is the Go equivalent of Python's _SUPPORTED_CAPABILITY_OVERRIDES
+	ac.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
+		"min_target_temperature":   {AttrName: "minTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
+		"max_target_temperature":   {AttrName: "maxTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
+		"supported_modes":          {AttrName: "supportedOpModes", ValueType: reflect.TypeOf(OperationalMode(0))},
+		"supported_swing_modes":    {AttrName: "supportedSwingModes", ValueType: reflect.TypeOf(SwingMode(0))},
+		"supported_fan_speeds":     {AttrName: "supportedFanSpeeds", ValueType: reflect.TypeOf(FanSpeed(0))},
+		"supported_aux_modes":      {AttrName: "supportedAuxModes", ValueType: reflect.TypeOf(AuxHeatMode(0))},
+		"supported_purifier_modes": {AttrName: "supportedPurifierModes", ValueType: reflect.TypeOf(PurifierMode(0))},
+		"additional_capabilities":  {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0))},
+	})
+
 	return ac
 }
 
@@ -638,9 +652,9 @@ func (ac *CommercialAirConditioner) updateCapabilities(res *QueryResponse) {
 
 	// If device can swing it can control the angle
 	ac.capabilities.Set(CapabilitySwingHorizontalAngle,
-		containsSwingMode(ac.supportedSwingModes, SwingModeHorizontal))
+		msmart.Contains(ac.supportedSwingModes, SwingModeHorizontal))
 	ac.capabilities.Set(CapabilitySwingVerticalAngle,
-		containsSwingMode(ac.supportedSwingModes, SwingModeVertical))
+		msmart.Contains(ac.supportedSwingModes, SwingModeVertical))
 
 	ac.capabilities.Set(CapabilityECO, res.SupportsEco)
 	ac.capabilities.Set(CapabilitySilent, res.SupportsSilent)
@@ -668,56 +682,6 @@ func (ac *CommercialAirConditioner) updateCapabilities(res *QueryResponse) {
 			ac.supportedAuxModes = append(ac.supportedAuxModes, AuxHeatModeFromValue(mode))
 		}
 	}
-}
-
-// Helper function to check if a swing mode is in a list
-func containsSwingMode(modes []SwingMode, mode SwingMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to check if an operational mode is in a list
-func containsOperationalMode(modes []OperationalMode, mode OperationalMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to check if a fan speed is in a list
-func containsFanSpeed(speeds []FanSpeed, speed FanSpeed) bool {
-	for _, s := range speeds {
-		if s == speed {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to check if a purifier mode is in a list
-func containsPurifierMode(modes []PurifierMode, mode PurifierMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to check if an aux heat mode is in a list
-func containsAuxHeatMode(modes []AuxHeatMode, mode AuxHeatMode) bool {
-	for _, m := range modes {
-		if m == mode {
-			return true
-		}
-	}
-	return false
 }
 
 // sendCommandsGetResponses sends a list of commands and return all valid responses.
@@ -830,14 +794,14 @@ func (ac *CommercialAirConditioner) Apply(ctx context.Context) error {
 
 	// Warn if trying to apply unsupported modes
 	if _, ok := ac.updatedControls[ControlIdMode]; ok {
-		if !containsOperationalMode(ac.supportedOpModes, ac.operationalMode) {
+		if !msmart.Contains(ac.supportedOpModes, ac.operationalMode) {
 			logger.Warn("Device is not capable of operational mode",
 				"id", ac.GetID(), "mode", ac.operationalMode)
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdFanSpeed]; ok {
-		if !containsFanSpeed(ac.supportedFanSpeeds, ac.fanSpeed) {
+		if !msmart.Contains(ac.supportedFanSpeeds, ac.fanSpeed) {
 			logger.Warn("Device is not capable of fan speed",
 				"id", ac.GetID(), "speed", ac.fanSpeed)
 		}
@@ -862,14 +826,14 @@ func (ac *CommercialAirConditioner) Apply(ctx context.Context) error {
 	}
 
 	if _, ok := ac.updatedControls[ControlIdPurifier]; ok {
-		if ac.purifier != PurifierModeOff && !containsPurifierMode(ac.supportedPurifierModes, ac.purifier) {
+		if ac.purifier != PurifierModeOff && !msmart.Contains(ac.supportedPurifierModes, ac.purifier) {
 			logger.Warn("Device is not capable of purifier mode",
 				"id", ac.GetID(), "mode", ac.purifier)
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdAuxMode]; ok {
-		if ac.auxMode != AuxHeatModeOff && !containsAuxHeatMode(ac.supportedAuxModes, ac.auxMode) {
+		if ac.auxMode != AuxHeatModeOff && !msmart.Contains(ac.supportedAuxModes, ac.auxMode) {
 			logger.Warn("Device is not capable of aux mode",
 				"id", ac.GetID(), "mode", ac.auxMode)
 		}
