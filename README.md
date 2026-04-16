@@ -251,13 +251,88 @@ midea query <name|id> [key] [--all] [--auto]
 
 ### 高级命令
 
-#### download - 下载设备协议和插件
-
-```bash
-midea download <host> [--account <账号> --password <密码>]
 ```
+midea - 美的空调控制 CLI v1.0.0
 
-下载设备的 Lua 协议和插件（需要美的账号密码）。
+用法:
+  midea [-v|--verbose] [--region <地区>] [--device_type <类型>] <command> [arguments]
+
+全局选项:
+  -v, --verbose        显示详细调试日志
+  --region <地区>      云端服务地区 (DE, KR, US), 默认: US
+  --device_type <类型> 设备类型: AC (空调), CC (商业空调), 默认: AC
+
+命令:
+  discover [<host>] [--auto-connect|-a] [--count <数量>] [--account <账号> --password <密码>]
+                                发现设备并保存到配置
+                                <host>: 可选,指定目标设备IP (发现单个设备)
+                                --auto-connect: 自动连接并获取V3设备的token
+                                --count: 广播包数量 (默认: 3)
+                                --account/--password: 美的账号密码 (V3设备认证需要)
+  list                          列出已保存的设备
+  bind <id|sn|ip> -n <名称>   绑定设备别名
+  unbind <name|id>            解绑设备
+
+  status <name|id> [--auto] [--capabilities [FILE]] [--energy]
+                                查询设备状态
+                                --auto: 自动发现设备并获取token
+                                --capabilities: 显示设备能力信息
+                                --capabilities FILE: 将设备能力写入YAML文件
+                                --energy: 显示能耗信息
+  on <name|id>                开机
+  off <name|id>               关机
+  temp <name|id> <温度>       设置温度 (范围: 16-30°C)
+  mode <name|id> <模式>       设置运行模式
+  fan <name|id> <风速>        设置风速
+  swing <name|id> <模式>      设置摆风模式
+  set <name|id> [选项]        多参数设置 (一次设置多个属性)
+  query <name|id> [key] [--all] [--auto]
+                                查询设备属性
+                                key: 属性名称 (如: temp, mode, fan, swing, power)
+                                --all: 显示所有属性 (默认)
+                                --auto: 自动发现设备并获取token
+  download <host> [--account <账号> --password <密码>]
+                                下载设备的 Lua 协议和插件
+                                --account/--password: 美的账号密码 (下载需要)
+
+参数范围:
+  温度: 16, 17, 18, ..., 29, 30 (°C)
+  模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)
+  风速: auto(自动), low(低), medium(中), high(高), silent(静音)
+  摆风: off(关闭), vertical(上下), horizontal(左右), both(全方位)
+
+set命令选项:
+  --temp <温度>      设置温度
+  --mode <模式>      设置运行模式
+  --fan <风速>       设置风速
+  --swing <模式>     设置摆风
+  --power <on|off>   设置电源
+
+示例:
+  midea discover                      # 发现局域网内的所有设备
+  midea discover 192.168.1.60         # 发现指定IP的设备
+  midea -v discover --auto-connect   # 使用verbose模式发现设备并自动获取V3设备token
+  midea discover --auto-connect --account your@email.com --password yourpass
+                                      # 使用自定义账号发现设备
+  midea list                          # 列出已保存的设备
+  midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备,命名为"客厅"
+  midea status 客厅                   # 查询"客厅"空调状态
+  midea status 客厅 --capabilities    # 查询"客厅"空调状态并显示设备能力
+  midea status 客厅 --capabilities caps.yaml  # 将设备能力写入 caps.yaml 文件
+  midea status 客厅 --energy          # 查询"客厅"空调状态并显示能耗信息
+  midea on 客厅                       # 打开"客厅"空调
+  midea temp 客厅 26                  # 设置温度为26°C
+  midea mode 客厅 cool                # 设置为制冷模式
+  midea fan 客厅 high                 # 设置为高风速
+  midea swing 客厅 vertical           # 设置为上下摆风
+
+  # 多参数设置 (一次命令设置多个属性)
+  midea set 客厅 --temp 26 --mode cool --fan high
+  midea set 客厅 --power on --temp 24
+
+  # 下载设备协议和插件
+  midea download 192.168.1.60 --account your@email.com --password yourpass
+```
 
 ## ⚙️ 配置
 
@@ -290,27 +365,6 @@ midea download <host> [--account <账号> --password <密码>]
 
 ## 🛠️ 开发
 
-### 项目结构
-
-```
-midea-msmart/
-├── cmd/                    # 命令行工具
-│   └── main.go            # 主入口
-├── msmart/                 # 核心库
-│   ├── cloud.go           # 云端 API
-│   ├── const.go           # 常量定义
-│   ├── crc8.go            # CRC8 校验
-│   ├── device.go          # 设备基类
-│   ├── frame.go           # 协议帧
-│   ├── lan.go             # 局域网通信
-│   ├── utils.go           # 工具函数
-│   └── device/            # 设备类型实现
-│       ├── ac/            # 空调设备
-│       └── cc/            # 商业空调
-├── go.mod                  # Go 模块定义
-├── go.sum                  # 依赖校验
-└── README.md              # 本文件
-```
 
 ### 从源码运行
 

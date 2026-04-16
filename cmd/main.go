@@ -41,15 +41,50 @@ var (
 	deviceToken string
 	deviceKey   string
 	verbose     bool
+
+	// Subcommand flags (shared across commands)
+	autoMode         bool
+	account          string
+	password         string
+	autoConnect      bool
+	showCapabilities bool
+	capabilitiesFile string
+	showEnergy       bool
+	showAll          bool
+	tempValue        string
+	modeValue        string
+	fanValue         string
+	swingValue       string
+	powerValue       string
+	name             string
+	discoveryCount   int
 )
 
 func init() {
+	// Global flags
 	pflag.StringVarP(&region, "region", "r", msmart.DefaultCloudRegion, "Cloud region (CN, US, EU)")
 	pflag.StringVarP(&deviceType, "device_type", "d", "AC", "Device type (AC, CC)")
 	pflag.IntVarP(&deviceID, "id", "i", 0, "Device ID for V3 devices")
 	pflag.StringVarP(&deviceToken, "token", "T", "", "Auth token for V3 devices")
 	pflag.StringVarP(&deviceKey, "key", "k", "", "Auth key for V3 devices")
 	pflag.BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+
+	// Subcommand flags
+	pflag.BoolVarP(&autoMode, "auto", "a", false, "Auto discover device")
+	pflag.StringVar(&account, "account", "", "Midea account")
+	pflag.StringVar(&password, "password", "", "Midea password")
+	pflag.BoolVarP(&autoConnect, "auto-connect", "c", false, "Auto connect and get token")
+	pflag.IntVar(&discoveryCount, "count", 3, "Discovery packet count")
+	pflag.BoolVarP(&showCapabilities, "capabilities", "", false, "Show capabilities")
+	pflag.StringVar(&capabilitiesFile, "capabilities-file", "", "Save capabilities to file")
+	pflag.BoolVarP(&showEnergy, "energy", "e", false, "Show energy info")
+	pflag.BoolVar(&showAll, "all", false, "Show all properties")
+	pflag.StringVarP(&tempValue, "temp", "t", "", "Temperature (16-30)")
+	pflag.StringVarP(&modeValue, "mode", "m", "", "Mode (cool/heat/auto/dry/fan)")
+	pflag.StringVarP(&fanValue, "fan", "f", "", "Fan speed (auto/low/medium/high/silent)")
+	pflag.StringVarP(&swingValue, "swing", "s", "", "Swing mode (off/vertical/horizontal/both)")
+	pflag.StringVarP(&powerValue, "power", "p", "", "Power state (on/off)")
+	pflag.StringVarP(&name, "name", "n", "", "Device name")
 
 	pflag.Usage = printUsage
 }
@@ -63,21 +98,8 @@ func main() {
 }
 
 func run() error {
-	// 简化解析：使用 pflag 的 UnknownFlags 特性
-	// 这样可以支持乱序参数，如：midea -v status 客厅 -a 或 midea status -v 客厅 -a
-
-	// 创建全局 FlagSet
-	globalFs := pflag.NewFlagSet("global", pflag.ContinueOnError)
-	globalFs.ParseErrorsWhitelist.UnknownFlags = true // 忽略未知参数
-	globalFs.StringVarP(&region, "region", "r", msmart.DefaultCloudRegion, "Cloud region (CN, US, EU)")
-	globalFs.StringVarP(&deviceType, "device_type", "d", "AC", "Device type (AC, CC)")
-	globalFs.IntVarP(&deviceID, "id", "i", 0, "Device ID for V3 devices")
-	globalFs.StringVarP(&deviceToken, "token", "T", "", "Auth token for V3 devices")
-	globalFs.StringVarP(&deviceKey, "key", "k", "", "Auth key for V3 devices")
-	globalFs.BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
-
-	// 一次性解析所有参数（忽略未知参数）
-	globalFs.Parse(os.Args[1:])
+	// 一次性解析所有参数
+	pflag.Parse()
 
 
 	if verbose {
@@ -93,7 +115,7 @@ func run() error {
 	}
 
 	// 获取非 flag 参数（命令和位置参数）
-	args := globalFs.Args()
+	args := pflag.Args()
 	if len(args) < 1 {
 		printUsage()
 		return fmt.Errorf("no command provided")
@@ -115,59 +137,95 @@ func run() error {
 	// Execute command
 	switch command {
 	case "discover":
-		return handleDiscover(configPath, region)
+		targetHost := ""
+		if len(args) > 1 {
+			targetHost = args[1]
+		}
+		return handleDiscover(configPath, region, targetHost, autoConnect, account, password, discoveryCount)
 	case "list":
 		return handleList(configPath)
 	case "bind":
-		identifier, name := parseBindArgs(args[1:])
-		return handleBind(configPath, identifier, name)
+		if len(args) < 2 {
+			return fmt.Errorf("bind requires identifier")
+		}
+		return handleBind(configPath, args[1], name)
 	case "unbind":
-		identifier := parseUnbindArgs(args[1:])
-		return handleUnbind(configPath, identifier)
+		if len(args) < 2 {
+			return fmt.Errorf("unbind requires identifier")
+		}
+		return handleUnbind(configPath, args[1])
 	case "status":
-		identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy := parseStatusArgs(args[1:])
+		identifier := ""
+		if len(args) > 1 {
+			identifier = args[1]
+		}
 		return handleStatus(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, showCapabilities, capabilitiesFile, showEnergy)
 	case "on":
-		identifier, autoMode := parsePowerArgs(args[1:])
+		identifier := ""
+		if len(args) > 1 {
+			identifier = args[1]
+		}
 		return handlePower(configPath, true, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
 	case "off":
-		identifier, autoMode := parsePowerArgs(args[1:])
+		identifier := ""
+		if len(args) > 1 {
+			identifier = args[1]
+		}
 		return handlePower(configPath, false, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode)
 	case "temp":
-		identifier, temp, autoMode, err := parseTempArgs(args[1:])
-		if err != nil {
-			return err
+		if len(args) < 3 {
+			return fmt.Errorf("temp requires identifier and temperature")
 		}
-		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, temp, autoMode)
+		temp, err := ParseTemp(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid temperature: %s", args[2])
+		}
+		return handleTemp(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, args[1], temp, autoMode)
 	case "mode":
-		identifier, mode, autoMode, err := parseModeArgs(args[1:])
-		if err != nil {
-			return err
+		if len(args) < 3 {
+			return fmt.Errorf("mode requires identifier and mode")
 		}
-		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, mode, autoMode)
+		mode, err := ParseMode(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid mode: %s", args[2])
+		}
+		return handleMode(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, args[1], mode, autoMode)
 	case "fan":
-		identifier, speed, autoMode, err := parseFanArgs(args[1:])
-		if err != nil {
-			return err
+		if len(args) < 3 {
+			return fmt.Errorf("fan requires identifier and fan speed")
 		}
-		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, speed, autoMode)
+		speed, err := ParseFanSpeed(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid fan speed: %s", args[2])
+		}
+		return handleFan(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, args[1], speed, autoMode)
 	case "swing":
-		identifier, swing, autoMode, err := parseSwingArgs(args[1:])
-		if err != nil {
-			return err
+		if len(args) < 3 {
+			return fmt.Errorf("swing requires identifier and swing mode")
 		}
-		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, swing, autoMode)
+		swing, err := ParseSwingMode(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid swing mode: %s", args[2])
+		}
+		return handleSwing(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, args[1], swing, autoMode)
 	case "set":
-		identifier, autoMode, temp, mode, fanSpeed, swingMode, power, err := parseSetArgs(args[1:])
-		if err != nil {
-			return err
+		identifier := ""
+		if len(args) > 1 {
+			identifier = args[1]
 		}
-		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, temp, mode, fanSpeed, swingMode, power)
+		return handleSet(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, autoMode, tempValue, modeValue, fanValue, swingValue, powerValue)
 	case "query":
-		identifier, key, showAll, autoMode := parseQueryArgs(args[1:])
+		identifier := ""
+		key := ""
+		if len(args) > 1 {
+			identifier = args[1]
+		}
+		if len(args) > 2 {
+			key = args[2]
+		}
 		return handleQuery(configPath, deviceTypeStr, deviceID, deviceToken, deviceKey, identifier, key, showAll, autoMode)
 	case "download":
-		return handleDownload(configPath, region)
+		return handleDownload(configPath, region, account, password)
 	default:
 		fmt.Printf("❌ 未知命令: %s\n", command)
 		printUsage()
@@ -266,7 +324,7 @@ set命令选项:
 // Discovery Commands
 // ============================================================================
 
-func handleDiscover(configPath string, region string) error {
+func handleDiscover(configPath string, region string, targetHost string, autoConnect bool, account string, password string, discoveryCount int) error {
 	fmt.Println("🔍 正在发现设备...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -276,43 +334,6 @@ func handleDiscover(configPath string, region string) error {
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
 		return err
-	}
-
-	// Parse host argument and flags
-	autoConnect := false
-	var account, password, targetHost string
-	discoveryCount := 3 // Default number of broadcast packets
-	for i := 2; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		switch arg {
-		case "--auto-connect", "-a":
-			autoConnect = true
-		case "--account":
-			if i+1 < len(os.Args) {
-				account = os.Args[i+1]
-				i++
-			}
-		case "--password":
-			if i+1 < len(os.Args) {
-				password = os.Args[i+1]
-				i++
-			}
-		case "--count":
-			if i+1 < len(os.Args) {
-				count, err := strconv.Atoi(os.Args[i+1])
-				if err != nil || count < 1 {
-					fmt.Printf("❌ 无效的 count 值: %s (应为正整数)\n", os.Args[i+1])
-					return fmt.Errorf("invalid count value: %s", os.Args[i+1])
-				}
-				discoveryCount = count
-				i++
-			}
-		default:
-			// First non-flag argument is the target host
-			if !strings.HasPrefix(arg, "-") && targetHost == "" {
-				targetHost = arg
-			}
-		}
 	}
 
 	// Discover devices
@@ -1310,7 +1331,7 @@ func handleSwing(configPath string, deviceTypeStr string, deviceID int, deviceTo
 }
 
 // handleSet handles the set command for multi-parameter control
-func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, autoMode bool, temp *float64, mode *ac.OperationalMode, fanSpeed *ac.FanSpeed, swingMode *ac.SwingMode, power *bool) error {
+func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToken, deviceKey string, identifier string, autoMode bool, tempStr, modeStr, fanStr, swingStr, powerStr string) error {
 	var device *config.Device
 	var deviceObj interface{}
 	var err error
@@ -1339,37 +1360,62 @@ func handleSet(configPath string, deviceTypeStr string, deviceID int, deviceToke
 	var changes []string
 
 	// Apply temperature if specified
-	if temp != nil {
-		acDevice.SetTargetTemperature(*temp)
-		changes = append(changes, fmt.Sprintf("温度 %.0f°C", *temp))
+	if tempStr != "" {
+		temp, err := ParseTemp(tempStr)
+		if err != nil {
+			return fmt.Errorf("invalid temperature: %s", tempStr)
+		}
+		acDevice.SetTargetTemperature(temp)
+		changes = append(changes, fmt.Sprintf("温度 %.0f°C", temp))
 		hasChanges = true
 	}
 
 	// Apply mode if specified
-	if mode != nil {
-		acDevice.SetOperationalMode(*mode)
-		changes = append(changes, fmt.Sprintf("模式 %s", ModeNames[*mode]))
+	if modeStr != "" {
+		mode, err := ParseMode(modeStr)
+		if err != nil {
+			return fmt.Errorf("invalid mode: %s", modeStr)
+		}
+		acDevice.SetOperationalMode(mode)
+		changes = append(changes, fmt.Sprintf("模式 %s", ModeNames[mode]))
 		hasChanges = true
 	}
 
 	// Apply fan speed if specified
-	if fanSpeed != nil {
-		acDevice.SetFanSpeed(*fanSpeed)
-		changes = append(changes, fmt.Sprintf("风速 %s", SpeedNames[*fanSpeed]))
+	if fanStr != "" {
+		fanSpeed, err := ParseFanSpeed(fanStr)
+		if err != nil {
+			return fmt.Errorf("invalid fan speed: %s", fanStr)
+		}
+		acDevice.SetFanSpeed(fanSpeed)
+		changes = append(changes, fmt.Sprintf("风速 %s", SpeedNames[fanSpeed]))
 		hasChanges = true
 	}
 
 	// Apply swing mode if specified
-	if swingMode != nil {
-		acDevice.SetSwingMode(*swingMode)
-		changes = append(changes, fmt.Sprintf("摆风 %s", SwingNames[*swingMode]))
+	if swingStr != "" {
+		swing, err := ParseSwingMode(swingStr)
+		if err != nil {
+			return fmt.Errorf("invalid swing mode: %s", swingStr)
+		}
+		acDevice.SetSwingMode(swing)
+		changes = append(changes, fmt.Sprintf("摆风 %s", SwingNames[swing]))
 		hasChanges = true
 	}
 
 	// Apply power state if specified
-	if power != nil {
-		acDevice.SetPowerState(*power)
-		if *power {
+	if powerStr != "" {
+		var power bool
+		switch strings.ToLower(powerStr) {
+		case "on", "true", "1":
+			power = true
+		case "off", "false", "0":
+			power = false
+		default:
+			return fmt.Errorf("invalid power state: %s", powerStr)
+		}
+		acDevice.SetPowerState(power)
+		if power {
 			changes = append(changes, "开机")
 		} else {
 			changes = append(changes, "关机")
@@ -1524,30 +1570,13 @@ func printSpecificAttribute(acDevice *ac.AirConditioner, key string) error {
 }
 
 // handleDownload handles the download command for downloading device protocol and plugin
-func handleDownload(configPath string, region string) error {
-	if len(os.Args) < 3 {
+func handleDownload(configPath string, region string, account string, password string) error {
+	if len(pflag.Args()) < 2 {
 		fmt.Println("❌ 用法: midea download <host> [--account <账号> --password <密码>]")
 		return fmt.Errorf("insufficient arguments for download command")
 	}
 
-	host := os.Args[2]
-
-	// Parse --account and --password flags
-	var account, password string
-	for i := 3; i < len(os.Args); i++ {
-		switch os.Args[i] {
-		case "--account":
-			if i+1 < len(os.Args) {
-				account = os.Args[i+1]
-				i++
-			}
-		case "--password":
-			if i+1 < len(os.Args) {
-				password = os.Args[i+1]
-				i++
-			}
-		}
-	}
+	host := pflag.Arg(1)
 
 	fmt.Printf("🔍 正在发现设备: %s\n", host)
 
