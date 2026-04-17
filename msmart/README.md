@@ -1,14 +1,14 @@
 # msmart
 
-A Go library for local control of Midea (and associated brands) smart air conditioners. Designed for ease of integration with minimal dependencies.
+Go 语言实现的美的（及关联品牌）智能空调本地控制库，设计简洁，依赖极少。
 
-> This is a Go translation of [msmart-ng](https://github.com/mill1000/midea-msmart) Python library.
-> 
-> **Note:** This project is developed using vibe coding.
+> 这是 [msmart-ng](https://github.com/mill1000/midea-msmart) Python 库的 Go 语言移植版本。
 
-## Supported Devices
+**⚠️ 这是有 AI vibe coding 的项目 - 由 AI 辅助开发和维护。**
 
-This library supports air conditioners from Midea and several associated brands that use the following Android apps or their iOS equivalents:
+## 支持的设备
+
+支持使用以下 Android 应用（或 iOS 等效版本）的美的及关联品牌空调：
 
 * Artic King (com.arcticking.ac)
 * Midea Air (com.midea.aircondition.obm)
@@ -17,17 +17,21 @@ This library supports air conditioners from Midea and several associated brands 
 * Toshiba AC NA (com.midea.toshiba)
 * 美的美居 (com.midea.ai.appliances)
 
-__Note: Only air conditioners (type 0xAC and 0xCC) are supported.__
+**注意：仅支持空调设备（类型 0xAC 和 0xCC）。**
 
-## Note On Cloud Usage
+## 关于云服务
 
-This library works locally. No internet connection is required to control your device.
+本库通过本地网络控制设备，无需互联网连接。
 
-_However_, for newer "V3" devices, the Midea Cloud is used to acquire a token & key for device authentication. Once retrieved and saved, no further cloud connection is required. Devices are not linked to the library's built-in accounts and concerned users may supply their own account credentials if they prefer.
+但对于较新的 "V3" 设备，需要从美的云端获取 token 和 key 用于设备认证。获取并保存后，无需再次连接云端。设备不会绑定到库的内置账号，用户也可使用自己的账号凭证。
 
-## Features
+## 安装
 
-### Simple API
+```shell
+go get github.com/RelicOfTesla/midea-msmart/msmart
+```
+
+## 快速开始
 
 ```go
 package main
@@ -40,142 +44,55 @@ import (
 )
 
 func main() {
-    // Build device (ip, port, deviceID, options...)
+    // 创建设备（IP, 端口, 设备ID, 选项...）
     device := ac.NewAirConditioner(
-        "10.100.1.140",  // IP address
-        6444,            // Port
-        15393162840672,  // Device ID
-        msmart.WithName("Living Room AC"),
+        "10.100.1.140",  // IP 地址
+        6444,            // 端口
+        "15393162840672",  // 设备 ID（字符串）
+        msmart.WithName("客厅空调"),
     )
 
-    // Get capabilities
     ctx := context.Background()
+    
+    // 获取设备能力
     if err := device.GetCapabilities(ctx); err != nil {
         panic(err)
     }
 
-    // Get current state
+    // 刷新设备状态
     if err := device.Refresh(ctx); err != nil {
         panic(err)
     }
 
-    power := device.PowerState()
-    if power != nil {
-        fmt.Printf("Power: %v\n", *power)
-    }
-    fmt.Printf("Temperature: %.1f°C\n", device.TargetTemperature())
+    fmt.Printf("电源: %v\n", device.PowerState())
+    fmt.Printf("温度: %.1f°C\n", device.TargetTemperature())
 }
 ```
 
-### Device Discovery
+## 设备发现
 
-Automatically discover devices on the local network or an individual device by IP or hostname.
+自动发现本地网络中的设备：
 
 ```go
-package main
+ctx := context.Background()
 
-import (
-    "context"
-    "fmt"
-    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Discover all devices on the network (pass nil for default config)
-    devices, err := msmart.Discover(ctx, nil)
-    if err != nil {
-        panic(err)
-    }
-
-    for _, device := range devices {
-        fmt.Printf("Found device: %s (%s)\n", device.GetName(), device.GetIP())
-    }
-
-    // Discover a single device by IP
-    device, err := msmart.DiscoverSingle(ctx, "10.100.1.140", nil)
-    if err != nil {
-        panic(err)
-    }
-
-    if device != nil {
-        fmt.Printf("Device: %s\n", device.GetName())
-    }
+// 发现所有设备
+devices, err := msmart.Discover(ctx, nil)
+if err != nil {
+    panic(err)
 }
-```
 
-__Note: V3 devices are automatically authenticated via the NetHome Plus cloud.__
-
-### Minimal Dependencies
-
-Built using Go standard library with minimal external dependencies.
-
-### Code Quality
-
-- Fully typed for clarity
-- Context support for cancellation and timeout
-- Error handling following Go conventions
-- Well-structured codebase
-
-## Installing
-
-```shell
-go get github.com/RelicOfTesla/midea-msmart/msmart
-```
-
-## Usage
-
-### Device Discovery
-
-Use the `Discover` function to find devices on your local network:
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Discover all devices (pass nil for default config)
-    devices, err := msmart.Discover(ctx, nil)
-    if err != nil {
-        panic(err)
-    }
-
-    for _, device := range devices {
-        data := map[string]interface{}{
-            "ip":       device.GetIP(),
-            "port":     device.GetPort(),
-            "id":       device.GetID(),
-            "online":   device.IsOnline(),
-            "supported": device.IsSupported(),
-            "type":     device.GetType(),
-            "name":     device.GetName(),
-            "sn":       device.GetSN(),
-        }
-
-        jsonData, _ := json.MarshalIndent(data, "", "  ")
-        fmt.Println(string(jsonData))
-    }
+for _, device := range devices {
+    fmt.Printf("发现设备: %s (%s)\n", device.GetName(), device.GetIP())
 }
+
+// 发现单个设备（按 IP）
+device, err := msmart.DiscoverSingle(ctx, "10.100.1.140", nil)
 ```
 
-Ensure the device type is `0xAC` (172) or `0xCC` (204) and the `supported` property is true.
+**注意：V3 设备会自动通过 NetHome Plus 云端认证。**
 
-Save the device ID, IP address, and port. Version 3 devices will also require the `token` and `key` fields to control the device.
-
-#### Warning: V3 Device Users
-
-For V3 devices, it's highly recommended to save your token and key values in a secure place. In the event that the cloud becomes unavailable, having these on hand will allow you to continue controlling your device locally.
-
-### Controlling Devices
+## 控制设备
 
 ```go
 package main
@@ -185,102 +102,69 @@ import (
     "encoding/hex"
     msmart "github.com/RelicOfTesla/midea-msmart/msmart"
     "github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
+    "github.com/RelicOfTesla/midea-msmart/msmart/device/xc"
 )
 
 func main() {
     ctx := context.Background()
 
-    // For V3 devices, you need token and key from discovery or cloud
+    // V3 设备需要 token 和 key
     token, _ := hex.DecodeString("YOUR_TOKEN_HEX_STRING")
     key, _ := hex.DecodeString("YOUR_KEY_HEX_STRING")
 
-    // Create device (ip, port, deviceID, options...)
     device := ac.NewAirConditioner(
-        "10.100.1.140",  // IP address
-        6444,            // Port
-        15393162840672,  // Device ID
-        msmart.WithVersion(3),  // For V3 devices
+        "10.100.1.140",
+        6444,
+        "15393162840672",
+        msmart.WithVersion(3),
     )
 
-    // Authenticate V3 device (required before control)
-    if err := device.Authenticate(token, key); err != nil {
+    // V3 设备需要认证
+    if err := device.Authenticate(ctx, token, key); err != nil {
         panic(err)
     }
 
-    // Get current state
+    // 刷新状态
     if err := device.Refresh(ctx); err != nil {
         panic(err)
     }
 
-    // Control the device
+    // 控制设备
     device.SetPowerState(true)
     device.SetTargetTemperature(20.5)
-    device.SetOperationalMode(ac.OperationalModeCool)
-    device.SetFanSpeed(ac.FanSpeedHigh)
+    device.SetOperationalMode(xc.OperationalModeCool)
+    device.SetFanSpeed(xc.FanSpeedHigh)
 
-    // Apply changes
+    // 应用更改
     if err := device.Apply(ctx); err != nil {
         panic(err)
     }
 }
 ```
 
-### Querying Device State
+## 查询设备状态
 
 ```go
-package main
+device := ac.NewAirConditioner("10.100.1.140", 6444, "15393162840672", msmart.WithVersion(3))
 
-import (
-    "context"
-    "fmt"
-    msmart "github.com/RelicOfTesla/midea-msmart/msmart"
-    "github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Create device (ip, port, deviceID, options...)
-    device := ac.NewAirConditioner(
-        "10.100.1.140",  // IP address
-        6444,            // Port
-        15393162840672,  // Device ID
-        msmart.WithVersion(3),  // For V3 devices
-    )
-
-    // Refresh device state
-    if err := device.Refresh(ctx); err != nil {
-        panic(err)
-    }
-
-    // Print current state
-    if power := device.PowerState(); power != nil {
-        fmt.Printf("Power: %v\n", *power)
-    }
-    fmt.Printf("Target Temperature: %.1f°C\n", device.TargetTemperature())
-    if indoor := device.IndoorTemperature(); indoor != nil {
-        fmt.Printf("Indoor Temperature: %.1f°C\n", *indoor)
-    }
-    fmt.Printf("Operational Mode: %v\n", device.OperationalMode())
-    fmt.Printf("Fan Speed: %v\n", device.FanSpeed())
+if err := device.Refresh(ctx); err != nil {
+    panic(err)
 }
+
+fmt.Printf("电源: %v\n", device.PowerState())
+fmt.Printf("目标温度: %.1f°C\n", device.TargetTemperature())
+if indoor := device.IndoorTemperature(); indoor != nil {
+    fmt.Printf("室内温度: %.1f°C\n", *indoor)
+}
+fmt.Printf("运行模式: %v\n", device.OperationalMode())
+fmt.Printf("风速: %v\n", device.FanSpeed())
 ```
 
-## Troubleshooting
+## 故障排除
 
-* If devices are not being discovered, ensure your devices are on the same subnet as your computer.
-* If a cloud connection cannot be made, try using credentials from a different region.
+* **设备无法发现**：确保设备与电脑在同一子网
+* **无法连接云端**：尝试使用其他地区的账号凭证
 
-## Gratitude
+## 许可证
 
-This project is a Go translation of [mill1000/midea-msmart](https://github.com/mill1000/midea-msmart), which builds upon the work of:
-
-* [mac-zhou/midea-msmart](https://github.com/mac-zhou/midea-msmart)
-* [dudanov/MideaUART](https://github.com/dudanov/MideaUART)
-* [NeoAcheron/midea-ac-py](https://github.com/NeoAcheron/midea-ac-py)
-* [andersonshatch/midea-ac-py](https://github.com/andersonshatch/midea-ac-py)
-* [yitsushi/midea-air-condition](https://github.com/yitsushi/midea-air-condition)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License
