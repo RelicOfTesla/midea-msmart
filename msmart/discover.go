@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/RelicOfTesla/midea-msmart/msmart/device"
 )
 
 // DiscoverError represents a discovery error
@@ -121,10 +123,10 @@ func getBroadcastAddresses() []string {
 type DeviceInfo struct {
 	IP         string
 	Port       int
-	DeviceID   int
+	DeviceID   string
 	Name       string
 	SN         string
-	DeviceType DeviceType
+	DeviceType device.DeviceType
 	Version    int
 }
 
@@ -136,8 +138,6 @@ type DiscoverConfig struct {
 	Timeout time.Duration
 	// DiscoveryPackets is the number of discovery packets to send (default: 3)
 	DiscoveryPackets int
-	// Interface is the network interface to use for discovery
-	Interface string
 	// Region is the cloud region
 	Region string
 	// Account is the cloud account
@@ -147,35 +147,43 @@ type DiscoverConfig struct {
 	// AutoConnect indicates whether to automatically connect and authenticate devices
 	AutoConnect bool
 	// ExistingToken is pre-existing token for V3 devices (to skip cloud auth)
-	ExistingToken []byte
+	ExistingToken device.Token
 	// ExistingKey is pre-existing key for V3 devices (to skip cloud auth)
-	ExistingKey []byte
+	ExistingKey device.Key
+	// ExistingLocalKey is pre-existing local key for V3 devices (to skip cloud auth)
+	ExistingLocalKey device.LocalKey
+	// ExistingLocalKeyExpired is the expiration time of the pre-existing local key
+	ExistingLocalKeyExpired *time.Time
+}
+
+func (c *DiscoverConfig) defaultFix() {
+	if c.Timeout == 0 {
+		c.Timeout = DefaultDiscoveryTimeout
+	}
+	if c.DiscoveryPackets == 0 {
+		c.DiscoveryPackets = DefaultDiscoveryPackets
+	}
+	if c.Region == "" {
+		c.Region = DefaultCloudRegion
+	}
+	if c.Target == "" {
+		c.Target = IPv4Broadcast
+	}
 }
 
 // DiscoverResult represents a discovered device result
 type DiscoverResult struct {
-	Device *Device
+	Device device.Device
 	Error  error
 }
 
 // Discover discovers Midea smart devices on the local network
-func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
+func Discover(ctx context.Context, config *DiscoverConfig) ([]device.Device, error) {
 	// Set default values
 	if config == nil {
 		config = &DiscoverConfig{}
 	}
-	if config.Target == "" {
-		config.Target = IPv4Broadcast
-	}
-	if config.Timeout == 0 {
-		config.Timeout = DefaultDiscoveryTimeout
-	}
-	if config.DiscoveryPackets == 0 {
-		config.DiscoveryPackets = DefaultDiscoveryPackets
-	}
-	if config.Region == "" {
-		config.Region = DefaultCloudRegion
-	}
+	config.defaultFix()
 
 	// Create a packet connection for UDP
 	conn, err := net.ListenPacket("udp", "0.0.0.0:0")
@@ -282,7 +290,7 @@ func Discover(ctx context.Context, config *DiscoverConfig) ([]*Device, error) {
 	close(results)
 
 	// Collect results
-	var devices []*Device
+	var devices []device.Device
 	var errs []error
 
 	for result := range results {
@@ -358,14 +366,14 @@ func handleDiscoveryResponses(ctx context.Context, conn net.PacketConn, discover
 
 		// Process the response in a goroutine
 		go func(ip string, data []byte) {
-			device, err := processDiscoveryResponse(ip, data, config)
+			device, err := processDiscoveryResponse(ctx, ip, data, config)
 			results <- &DiscoverResult{Device: device, Error: err}
 		}(ip, buf[:n])
 	}
 }
 
 // processDiscoveryResponse processes a discovery response
-func processDiscoveryResponse(ip string, data []byte, config *DiscoverConfig) (*Device, error) {
+func processDiscoveryResponse(ctx context.Context, ip string, data []byte, config *DiscoverConfig) (device.Device, error) {
 	// Get device version
 	version, err := getDeviceVersion(data)
 	if err != nil {
@@ -383,33 +391,40 @@ func processDiscoveryResponse(ip string, data []byte, config *DiscoverConfig) (*
 	verboseLog("Device info for %s: %+v", ip, info)
 
 	// Construct device with optional pre-set token/key for V3 devices
-	opts := []DeviceOption{
-		WithSN(info.SN),
-		WithName(info.Name),
-		WithVersion(info.Version),
+	opts := []device.DeviceOption{
+		device.WithSN(info.SN),
+		device.WithName(info.Name),
+		device.WithVersion(info.Version),
 	}
 
 	// If existing token/key are provided (for V3 devices to skip cloud auth)
 	if config.ExistingToken != nil && config.ExistingKey != nil {
-		opts = append(opts, WithTokenKey(config.ExistingToken, config.ExistingKey))
+		opts = append(opts, device.WithTokenKey(config.ExistingToken, config.ExistingKey))
+	}
+	if config.ExistingLocalKey != nil && config.ExistingLocalKeyExpired != nil {
+		opts = append(opts, device.WithLocalKey(config.ExistingLocalKey, *config.ExistingLocalKeyExpired))
 	}
 
-	device := NewDevice(
-		info.IP,
-		info.Port,
-		info.DeviceID,
-		info.DeviceType,
-		opts...,
+	// Add device address and ID to options
+	opts = append(opts,
+		device.WithDeviceAddr(info.IP, info.Port),
+		device.WithDeviceID(info.DeviceID),
 	)
+
+	// Create device using factory
+	deviceObj := device.NewDeviceFromType(info.DeviceType, opts...)
+	if deviceObj == nil {
+		return nil, fmt.Errorf("failed to create device: unsupported device type %v", info.DeviceType)
+	}
 
 	// Auto-connect if requested
 	if config.AutoConnect {
-		if err := ConnectDevice(device, config); err != nil {
+		if err := ConnectDevice(ctx, deviceObj, config); err != nil {
 			return nil, err
 		}
 	}
 
-	return device, nil
+	return deviceObj, nil
 }
 
 // getDeviceVersion determines the device version from discovery response
@@ -556,12 +571,12 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 	name := string(decryptedData[41 : 41+nameLength])
 
 	// Extract device type from name
-	var deviceType DeviceType
+	var deviceType device.DeviceType
 	parts := strings.Split(name, "_")
 	if len(parts) >= 2 {
 		typeHex := parts[1]
 		if typeVal, err := strconv.ParseInt(typeHex, 16, 32); err == nil {
-			deviceType = DeviceType(typeVal)
+			deviceType = device.DeviceType(typeVal)
 		}
 	}
 
@@ -569,7 +584,7 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 	return &DeviceInfo{
 		IP:         ip,
 		Port:       port,
-		DeviceID:   deviceID,
+		DeviceID:   strconv.Itoa(deviceID),
 		Name:       name,
 		SN:         strings.TrimRight(sn, "\x00"), // Trim null characters
 		DeviceType: deviceType,
@@ -578,7 +593,7 @@ func getDeviceInfoV2V3(ip string, version int, data []byte) (*DeviceInfo, error)
 }
 
 // DiscoverSingle discovers a single device by hostname or IP
-func DiscoverSingle(ctx context.Context, host string, config *DiscoverConfig) (*Device, error) {
+func DiscoverSingle(ctx context.Context, host string, config *DiscoverConfig) (device.Device, error) {
 	// Set default values
 	if config == nil {
 		config = &DiscoverConfig{}
@@ -586,7 +601,7 @@ func DiscoverSingle(ctx context.Context, host string, config *DiscoverConfig) (*
 
 	// Set target to the specific host
 	config.Target = host
-	config.AutoConnect = false // Don't auto-connect for single discovery
+	// config.AutoConnect = false // Don't auto-connect for single discovery
 
 	// Discover devices
 	devices, err := Discover(ctx, config)
@@ -605,15 +620,10 @@ func DiscoverSingle(ctx context.Context, host string, config *DiscoverConfig) (*
 }
 
 // ConnectDevice connects, authenticates as needed and refreshes a device
-func ConnectDevice(device *Device, config *DiscoverConfig) error {
-	version := 2
-	if v := device.GetVersion(); v != nil {
-		version = *v
-	}
-
+func ConnectDevice(ctx context.Context, dev device.Device, config *DiscoverConfig) error {
 	// Authenticate V3 devices
-	if version == 3 {
-		success, err := authenticateDevice(device, config)
+	if dev, ok := dev.(device.DeviceAuthV3); ok {
+		success, err := authenticateDevice(ctx, dev, config)
 		if err != nil {
 			return err
 		}
@@ -623,7 +633,7 @@ func ConnectDevice(device *Device, config *DiscoverConfig) error {
 	}
 
 	// Attempt to refresh the device state
-	if err := device.Refresh(context.Background()); err != nil {
+	if err := dev.Refresh(ctx); err != nil {
 		slog.Warn("Device refresh failed", "error", err)
 	}
 
@@ -631,16 +641,10 @@ func ConnectDevice(device *Device, config *DiscoverConfig) error {
 }
 
 // authenticateDevice attempts to authenticate a V3 device
-func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
+func authenticateDevice(ctx context.Context, device device.DeviceAuthV3, config *DiscoverConfig) (bool, error) {
 	// First, try to use pre-set token/key if available (skip cloud authentication)
-	if device.presetToken != nil && device.presetKey != nil {
-		verboseLog("Using pre-set token/key for V3 device authentication (skipping cloud)")
-		if err := device.Authenticate(device.presetToken, device.presetKey); err != nil {
-			verboseLog("Pre-set token/key authentication failed: %v", err)
-			// Fall through to cloud authentication
-		} else {
-			return true, nil
-		}
+	if ok, err := device.AuthenticateFromPreset(ctx); err == nil && ok {
+		return true, nil
 	}
 
 	// Note: Cloud credentials can be provided explicitly or will use defaults in getCloud()
@@ -659,12 +663,16 @@ func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
 	// Try authenticating with udpids generated from both endians
 	for _, endian := range []string{"little", "big"} {
 		// Generate udpid
-		deviceID := device.GetID()
+		deviceIDStr := device.GetID()
+		deviceId, err := strconv.Atoi(deviceIDStr)
+		if err != nil {
+			continue
+		}
 		var udpid []byte
 		if endian == "little" {
-			udpid = SecurityUdpid(intToBytesLittleEndian(deviceID, 6))
+			udpid = SecurityUdpid(intToBytesLittleEndian(deviceId, 6))
 		} else {
-			udpid = SecurityUdpid(intToBytesBigEndian(deviceID, 6))
+			udpid = SecurityUdpid(intToBytesBigEndian(deviceId, 6))
 		}
 
 		udpidHex := hex.EncodeToString(udpid)
@@ -688,7 +696,7 @@ func authenticateDevice(device *Device, config *DiscoverConfig) (bool, error) {
 		}
 
 		// Authenticate
-		if err := device.Authenticate(tokenBytes, keyBytes); err != nil {
+		if err := device.Authenticate(ctx, tokenBytes, keyBytes); err != nil {
 			if _, ok := err.(*AuthenticationError); ok {
 				continue
 			}

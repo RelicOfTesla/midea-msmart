@@ -8,17 +8,20 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"time"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
+	"github.com/RelicOfTesla/midea-msmart/msmart/device"
+	"github.com/RelicOfTesla/midea-msmart/msmart/device/xc"
 )
 
 // SubmitMode defines how a property should be submitted
 type SubmitMode int
 
 const (
-	SubmitModeFullState   SubmitMode = iota // Requires full state submission (SetStateCommand)
-	SubmitModeSingleProperty                // Supports single property submission (SetPropertiesCommand)
-	SubmitModeRefreshFirst                  // Needs to refresh current state before submission
+	SubmitModeFullState      SubmitMode = iota // Requires full state submission (SetStateCommand)
+	SubmitModeSingleProperty                   // Supports single property submission (SetPropertiesCommand)
+	SubmitModeRefreshFirst                     // Needs to refresh current state before submission
 )
 
 // propertyConfig defines the submission mode for each property
@@ -31,22 +34,22 @@ type propertyConfig struct {
 // This determines how each property should be handled during Apply()
 var propertySubmitConfig = map[string]propertyConfig{
 	// Full state submission - main AC controls
-	"power_state":         {mode: SubmitModeRefreshFirst}, // Need current state to avoid accidental power off
-	"target_temperature":  {mode: SubmitModeFullState},
-	"operational_mode":    {mode: SubmitModeFullState},
-	"fan_speed":           {mode: SubmitModeFullState},
-	"swing_mode":          {mode: SubmitModeFullState},
-	"eco":                 {mode: SubmitModeFullState},
-	"turbo":               {mode: SubmitModeFullState},
-	"freeze_protection":   {mode: SubmitModeFullState},
-	"sleep":               {mode: SubmitModeFullState},
-	"fahrenheit":          {mode: SubmitModeFullState},
-	"follow_me":           {mode: SubmitModeFullState},
-	"purifier":            {mode: SubmitModeFullState},
-	"target_humidity":     {mode: SubmitModeFullState},
-	"aux_heat":            {mode: SubmitModeFullState},
+	"power_state":          {mode: SubmitModeRefreshFirst}, // Need current state to avoid accidental power off
+	"target_temperature":   {mode: SubmitModeFullState},
+	"operational_mode":     {mode: SubmitModeFullState},
+	"fan_speed":            {mode: SubmitModeFullState},
+	"swing_mode":           {mode: SubmitModeFullState},
+	"eco":                  {mode: SubmitModeFullState},
+	"turbo":                {mode: SubmitModeFullState},
+	"freeze_protection":    {mode: SubmitModeFullState},
+	"sleep":                {mode: SubmitModeFullState},
+	"fahrenheit":           {mode: SubmitModeFullState},
+	"follow_me":            {mode: SubmitModeFullState},
+	"purifier":             {mode: SubmitModeFullState},
+	"target_humidity":      {mode: SubmitModeFullState},
+	"aux_heat":             {mode: SubmitModeFullState},
 	"independent_aux_heat": {mode: SubmitModeFullState},
-	"beep_on":             {mode: SubmitModeFullState},
+	"beep_on":              {mode: SubmitModeFullState},
 
 	// Single property submission - specific features
 	"swing_ud_angle": {mode: SubmitModeSingleProperty, propertyId: PropertyIdSwingUdAngle},
@@ -56,211 +59,6 @@ var propertySubmitConfig = map[string]propertyConfig{
 	"breeze_away":    {mode: SubmitModeSingleProperty, propertyId: PropertyIdBreezeAway},
 	"rate_select":    {mode: SubmitModeSingleProperty, propertyId: PropertyIdRateSelect},
 	"fresh_air":      {mode: SubmitModeSingleProperty, propertyId: PropertyIdFreshAir},
-}
-
-// FanSpeed represents fan speed enum
-type FanSpeed int
-
-const (
-	FanSpeedAuto   FanSpeed = 102
-	FanSpeedMax    FanSpeed = 100
-	FanSpeedHigh   FanSpeed = 80
-	FanSpeedMedium FanSpeed = 60
-	FanSpeedLow    FanSpeed = 40
-	FanSpeedSilent FanSpeed = 20
-
-	FanSpeedDefault FanSpeed = FanSpeedAuto
-)
-
-// String returns the string representation of FanSpeed
-func (fs FanSpeed) String() string {
-	switch fs {
-	case FanSpeedAuto:
-		return "AUTO"
-	case FanSpeedMax:
-		return "MAX"
-	case FanSpeedHigh:
-		return "HIGH"
-	case FanSpeedMedium:
-		return "MEDIUM"
-	case FanSpeedLow:
-		return "LOW"
-	case FanSpeedSilent:
-		return "SILENT"
-	default:
-		return fmt.Sprintf("FanSpeed(%d)", int(fs))
-	}
-}
-
-// Values returns all valid FanSpeed values
-func (FanSpeed) Values() []FanSpeed {
-	return []FanSpeed{
-		FanSpeedAuto, FanSpeedMax, FanSpeedHigh,
-		FanSpeedMedium, FanSpeedLow, FanSpeedSilent,
-	}
-}
-
-// GetFromValue returns the FanSpeed for a given value, or the default if not found
-func (FanSpeed) GetFromValue(value int) FanSpeed {
-	for _, fs := range FanSpeed(0).Values() {
-		if int(fs) == value {
-			return fs
-		}
-	}
-	return FanSpeedDefault
-}
-
-// GetFromName returns the FanSpeed for a given name, or the default if not found
-func (FanSpeed) GetFromName(name string) FanSpeed {
-	switch name {
-	case "AUTO":
-		return FanSpeedAuto
-	case "MAX":
-		return FanSpeedMax
-	case "HIGH":
-		return FanSpeedHigh
-	case "MEDIUM":
-		return FanSpeedMedium
-	case "LOW":
-		return FanSpeedLow
-	case "SILENT":
-		return FanSpeedSilent
-	default:
-		return FanSpeedDefault
-	}
-}
-
-// OperationalMode represents operational mode enum
-type OperationalMode int
-
-const (
-	OperationalModeAuto     OperationalMode = 1
-	OperationalModeCool     OperationalMode = 2
-	OperationalModeDry      OperationalMode = 3
-	OperationalModeHeat     OperationalMode = 4
-	OperationalModeFanOnly  OperationalMode = 5
-	OperationalModeSmartDry OperationalMode = 6
-
-	OperationalModeDefault OperationalMode = OperationalModeFanOnly
-)
-
-// String returns the string representation of OperationalMode
-func (om OperationalMode) String() string {
-	switch om {
-	case OperationalModeAuto:
-		return "AUTO"
-	case OperationalModeCool:
-		return "COOL"
-	case OperationalModeDry:
-		return "DRY"
-	case OperationalModeHeat:
-		return "HEAT"
-	case OperationalModeFanOnly:
-		return "FAN_ONLY"
-	case OperationalModeSmartDry:
-		return "SMART_DRY"
-	default:
-		return fmt.Sprintf("OperationalMode(%d)", int(om))
-	}
-}
-
-// Values returns all valid OperationalMode values
-func (OperationalMode) Values() []OperationalMode {
-	return []OperationalMode{
-		OperationalModeAuto, OperationalModeCool, OperationalModeDry,
-		OperationalModeHeat, OperationalModeFanOnly, OperationalModeSmartDry,
-	}
-}
-
-// GetFromValue returns the OperationalMode for a given value, or the default if not found
-func (OperationalMode) GetFromValue(value int) OperationalMode {
-	for _, om := range OperationalMode(0).Values() {
-		if int(om) == value {
-			return om
-		}
-	}
-	return OperationalModeDefault
-}
-
-// GetFromName returns the OperationalMode for a given name, or the default if not found
-func (OperationalMode) GetFromName(name string) OperationalMode {
-	switch name {
-	case "AUTO":
-		return OperationalModeAuto
-	case "COOL":
-		return OperationalModeCool
-	case "DRY":
-		return OperationalModeDry
-	case "HEAT":
-		return OperationalModeHeat
-	case "FAN_ONLY":
-		return OperationalModeFanOnly
-	case "SMART_DRY":
-		return OperationalModeSmartDry
-	default:
-		return OperationalModeDefault
-	}
-}
-
-// SwingMode represents swing mode enum
-type SwingMode int
-
-const (
-	SwingModeOff       SwingMode = 0x0
-	SwingModeVertical  SwingMode = 0xC
-	SwingModeHorizontal SwingMode = 0x3
-	SwingModeBoth      SwingMode = 0xF
-
-	SwingModeDefault SwingMode = SwingModeOff
-)
-
-// String returns the string representation of SwingMode
-func (sm SwingMode) String() string {
-	switch sm {
-	case SwingModeOff:
-		return "OFF"
-	case SwingModeVertical:
-		return "VERTICAL"
-	case SwingModeHorizontal:
-		return "HORIZONTAL"
-	case SwingModeBoth:
-		return "BOTH"
-	default:
-		return fmt.Sprintf("SwingMode(%d)", int(sm))
-	}
-}
-
-// Values returns all valid SwingMode values
-func (SwingMode) Values() []SwingMode {
-	return []SwingMode{
-		SwingModeOff, SwingModeVertical, SwingModeHorizontal, SwingModeBoth,
-	}
-}
-
-// GetFromValue returns the SwingMode for a given value, or the default if not found
-func (SwingMode) GetFromValue(value int) SwingMode {
-	for _, sm := range SwingMode(0).Values() {
-		if int(sm) == value {
-			return sm
-		}
-	}
-	return SwingModeDefault
-}
-
-// GetFromName returns the SwingMode for a given name, or the default if not found
-func (SwingMode) GetFromName(name string) SwingMode {
-	switch name {
-	case "OFF":
-		return SwingModeOff
-	case "VERTICAL":
-		return SwingModeVertical
-	case "HORIZONTAL":
-		return SwingModeHorizontal
-	case "BOTH":
-		return SwingModeBoth
-	default:
-		return SwingModeDefault
-	}
 }
 
 // SwingAngle represents swing angle enum
@@ -787,32 +585,32 @@ func (Capability) GetFromName(name string) Capability {
 // AirConditioner represents an air conditioner device
 // This is the main struct that translates Python's AirConditioner class
 type AirConditioner struct {
-	*msmart.Device
+	Device *msmart.DeviceBase
 
 	// Basic controls
-	beepOn           bool
-	powerState       *bool
+	beepOn            bool
+	powerState        *bool
 	targetTemperature float64
-	targetHumidity   int
+	targetHumidity    int
 
-	operationalMode OperationalMode
-	fanSpeed        interface{} // FanSpeed or int for custom speeds
-	swingMode       SwingMode
+	operationalMode xc.OperationalMode
+	fanSpeed        xc.FanSpeed // FanSpeed or int for custom speeds
+	swingMode       xc.SwingMode
 
-	eco               bool
-	turbo             bool
+	eco              bool
+	turbo            bool
 	freezeProtection bool
-	sleep             bool
+	sleep            bool
 
 	fahrenheitUnit bool // Display temperature in Fahrenheit
-	displayOn       *bool
+	displayOn      *bool
 
 	// Advanced controls
-	followMe   bool
-	purifier   bool
-	ieco       bool
-	flashCool  bool
-	outSilent  bool
+	followMe  bool
+	purifier  bool
+	ieco      bool
+	flashCool bool
+	outSilent bool
 
 	horizontalSwingAngle SwingAngle
 	verticalSwingAngle   SwingAngle
@@ -826,11 +624,11 @@ type AirConditioner struct {
 	indoorHumidity     *int
 	outdoorTemperature *float64
 
-	filterAlert       *bool
-	errorCode         *int
-	selfCleanActive   *bool
-	defrostActive     *bool
-	outdoorFanSpeed   *int
+	filterAlert     *bool
+	errorCode       *int
+	selfCleanActive *bool
+	defrostActive   *bool
+	outdoorFanSpeed *int
 
 	totalEnergyUsage   map[EnergyDataFormat]*float64
 	currentEnergyUsage map[EnergyDataFormat]*float64
@@ -843,15 +641,15 @@ type AirConditioner struct {
 
 	capabilities *msmart.CapabilityManager
 
-	supportedOpModes    []OperationalMode
-	supportedSwingModes []SwingMode
-	supportedFanSpeeds  []interface{} // FanSpeed or int
+	supportedOpModes     []xc.OperationalMode
+	supportedSwingModes  []xc.SwingMode
+	supportedFanSpeeds   []interface{} // FanSpeed or int
 	supportedRateSelects []RateSelect
 	supportedAuxModes    []AuxHeatMode
 
 	// Misc
-	requestEnergyUsage  bool
-	requestGroup5Data   bool
+	requestEnergyUsage bool
+	requestGroup5Data  bool
 
 	// Supported properties
 	supportedProperties map[PropertyId]bool
@@ -859,36 +657,39 @@ type AirConditioner struct {
 	needsRefresh        bool // Flag to indicate if Refresh() is needed before Apply()
 }
 
+var _ device.Device = (*AirConditioner)(nil)
+var _ device.DeviceAuthV3 = (*AirConditioner)(nil)
+
 // NewAirConditioner creates a new AirConditioner instance
 // This is the Go equivalent of Python's __init__ method
-func NewAirConditioner(ip string, port int, deviceID int, opts ...msmart.DeviceOption) *AirConditioner {
+func NewAirConditioner(ip string, port int, deviceID string, opts ...msmart.DeviceOption) *AirConditioner {
 	ac := &AirConditioner{
-		Device: msmart.NewDevice(ip, port, deviceID, msmart.DeviceTypeAirConditioner, opts...),
+		Device: msmart.NewBaseDevice(ip, port, deviceID, msmart.DeviceTypeAirConditioner, opts...),
 
 		// Basic controls
-		beepOn:           false,
-		powerState:       nil,
+		beepOn:            false,
+		powerState:        nil,
 		targetTemperature: 17.0,
-		targetHumidity:   40,
+		targetHumidity:    40,
 
-		operationalMode: OperationalModeAuto,
-		fanSpeed:        FanSpeedAuto,
-		swingMode:       SwingModeOff,
+		operationalMode: xc.OperationalModeAuto,
+		fanSpeed:        xc.FanSpeedAuto,
+		swingMode:       xc.SwingModeOff,
 
-		eco:               false,
-		turbo:             false,
+		eco:              false,
+		turbo:            false,
 		freezeProtection: false,
-		sleep:             false,
+		sleep:            false,
 
 		fahrenheitUnit: false,
-		displayOn:       nil,
+		displayOn:      nil,
 
 		// Advanced controls
-		followMe:   false,
-		purifier:   false,
-		ieco:       false,
-		flashCool:  false,
-		outSilent:  false,
+		followMe:  false,
+		purifier:  false,
+		ieco:      false,
+		flashCool: false,
+		outSilent: false,
 
 		horizontalSwingAngle: SwingAngleOff,
 		verticalSwingAngle:   SwingAngleOff,
@@ -902,11 +703,11 @@ func NewAirConditioner(ip string, port int, deviceID int, opts ...msmart.DeviceO
 		indoorHumidity:     nil,
 		outdoorTemperature: nil,
 
-		filterAlert:       nil,
-		errorCode:         nil,
-		selfCleanActive:   nil,
-		defrostActive:     nil,
-		outdoorFanSpeed:   nil,
+		filterAlert:     nil,
+		errorCode:       nil,
+		selfCleanActive: nil,
+		defrostActive:   nil,
+		outdoorFanSpeed: nil,
 
 		totalEnergyUsage:   make(map[EnergyDataFormat]*float64),
 		currentEnergyUsage: make(map[EnergyDataFormat]*float64),
@@ -919,9 +720,9 @@ func NewAirConditioner(ip string, port int, deviceID int, opts ...msmart.DeviceO
 
 		capabilities: msmart.NewCapabilityManager(int64(CapabilityDefault)),
 
-		supportedOpModes:    OperationalMode(0).Values(),
-		supportedSwingModes: SwingMode(0).Values(),
-		supportedFanSpeeds:  make([]interface{}, 0),
+		supportedOpModes:     xc.OperationalMode(0).Values(),
+		supportedSwingModes:  xc.SwingMode(0).Values(),
+		supportedFanSpeeds:   make([]interface{}, 0),
 		supportedRateSelects: []RateSelect{RateSelectOff},
 		supportedAuxModes:    []AuxHeatMode{AuxHeatModeOff},
 
@@ -935,21 +736,21 @@ func NewAirConditioner(ip string, port int, deviceID int, opts ...msmart.DeviceO
 	}
 
 	// Initialize fan speeds
-	for _, fs := range FanSpeed(0).Values() {
+	for _, fs := range xc.FanSpeed(0).Values() {
 		ac.supportedFanSpeeds = append(ac.supportedFanSpeeds, fs)
 	}
 
 	// Initialize supported capability overrides
 	// This is the Go equivalent of Python's _SUPPORTED_CAPABILITY_OVERRIDES
-	ac.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
-		"min_target_temperature":   {AttrName: "minTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
-		"max_target_temperature":   {AttrName: "maxTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
-		"supported_modes":          {AttrName: "supportedOpModes", ValueType: reflect.TypeOf(OperationalMode(0))},
-		"supported_swing_modes":    {AttrName: "supportedSwingModes", ValueType: reflect.TypeOf(SwingMode(0))},
-		"supported_fan_speeds":     {AttrName: "supportedFanSpeeds", ValueType: reflect.TypeOf(FanSpeed(0))},
-		"supported_aux_modes":      {AttrName: "supportedAuxModes", ValueType: reflect.TypeOf(AuxHeatMode(0))},
-		"supported_rate_selects":   {AttrName: "supportedRateSelects", ValueType: reflect.TypeOf(RateSelect(0))},
-		"additional_capabilities":  {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0)), IsFlag: true},
+	ac.Device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
+		"min_target_temperature":  {AttrName: "minTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
+		"max_target_temperature":  {AttrName: "maxTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
+		"supported_modes":         {AttrName: "supportedOpModes", ValueType: reflect.TypeOf(xc.OperationalMode(0))},
+		"supported_swing_modes":   {AttrName: "supportedSwingModes", ValueType: reflect.TypeOf(xc.SwingMode(0))},
+		"supported_fan_speeds":    {AttrName: "supportedFanSpeeds", ValueType: reflect.TypeOf(xc.FanSpeed(0))},
+		"supported_aux_modes":     {AttrName: "supportedAuxModes", ValueType: reflect.TypeOf(AuxHeatMode(0))},
+		"supported_rate_selects":  {AttrName: "supportedRateSelects", ValueType: reflect.TypeOf(RateSelect(0))},
+		"additional_capabilities": {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0)), IsFlag: true},
 	})
 
 	return ac
@@ -964,16 +765,16 @@ func (ac *AirConditioner) updateState(res ResponseInterface) {
 
 		ac.powerState = r.PowerOn
 		ac.targetTemperature = ptrToVal(r.TargetTemperature, ac.targetTemperature)
-		ac.operationalMode = OperationalMode(0).GetFromValue(int(ptrToVal(r.OperationalMode, byte(ac.operationalMode))))
+		ac.operationalMode = xc.OperationalMode(0).GetFromValue(int(ptrToVal(r.OperationalMode, byte(ac.operationalMode))))
 
 		if ac.supportsCustomFanSpeed() {
 			// Attempt to use fan speed enum, but fallback to raw int if custom
-			ac.fanSpeed = ptrToVal(r.FanSpeed, byte(FanSpeedAuto))
+			ac.fanSpeed = xc.FanSpeed(ptrToVal(r.FanSpeed, byte(xc.FanSpeedAuto)))
 		} else {
-			ac.fanSpeed = FanSpeed(0).GetFromValue(int(ptrToVal(r.FanSpeed, byte(FanSpeedAuto))))
+			ac.fanSpeed = xc.FanSpeed(0).GetFromValue(int(ptrToVal(r.FanSpeed, byte(xc.FanSpeedAuto))))
 		}
 
-		ac.swingMode = SwingMode(0).GetFromValue(int(ptrToVal(r.SwingMode, byte(ac.swingMode))))
+		ac.swingMode = xc.SwingMode(0).GetFromValue(int(ptrToVal(r.SwingMode, byte(ac.swingMode))))
 
 		ac.eco = ptrToVal(r.Eco, ac.eco)
 		ac.turbo = ptrToVal(r.Turbo, ac.turbo)
@@ -1095,58 +896,58 @@ func (ac *AirConditioner) updateState(res ResponseInterface) {
 // This is the Go equivalent of Python's _update_capabilities method
 func (ac *AirConditioner) updateCapabilities(res *CapabilitiesResponse) {
 	// Build list of supported operation modes
-	opModes := []OperationalMode{OperationalModeFanOnly}
+	opModes := []xc.OperationalMode{xc.OperationalModeFanOnly}
 	if res.DryMode() {
-		opModes = append(opModes, OperationalModeDry)
+		opModes = append(opModes, xc.OperationalModeDry)
 	}
 	if res.CoolMode() {
-		opModes = append(opModes, OperationalModeCool)
+		opModes = append(opModes, xc.OperationalModeCool)
 	}
 	if res.HeatMode() {
-		opModes = append(opModes, OperationalModeHeat)
+		opModes = append(opModes, xc.OperationalModeHeat)
 	}
 	if res.AutoMode() {
-		opModes = append(opModes, OperationalModeAuto)
+		opModes = append(opModes, xc.OperationalModeAuto)
 	}
 	if res.TargetHumidity() {
 		// Add SMART_DRY support if target humidity is supported
-		opModes = append(opModes, OperationalModeSmartDry)
+		opModes = append(opModes, xc.OperationalModeSmartDry)
 	}
 	ac.supportedOpModes = opModes
 
 	// Build list of supported swing modes
-	swingModes := []SwingMode{SwingModeOff}
+	swingModes := []xc.SwingMode{xc.SwingModeOff}
 	if res.SwingHorizontal() {
-		swingModes = append(swingModes, SwingModeHorizontal)
+		swingModes = append(swingModes, xc.SwingModeHorizontal)
 	}
 	if res.SwingVertical() {
-		swingModes = append(swingModes, SwingModeVertical)
+		swingModes = append(swingModes, xc.SwingModeVertical)
 	}
 	if res.SwingBoth() {
-		swingModes = append(swingModes, SwingModeBoth)
+		swingModes = append(swingModes, xc.SwingModeBoth)
 	}
 	ac.supportedSwingModes = swingModes
 
 	// Build list of supported fan speeds
 	fanSpeeds := make([]interface{}, 0)
 	if res.FanSilent() {
-		fanSpeeds = append(fanSpeeds, FanSpeedSilent)
+		fanSpeeds = append(fanSpeeds, xc.FanSpeedSilent)
 	}
 	if res.FanLow() {
-		fanSpeeds = append(fanSpeeds, FanSpeedLow)
+		fanSpeeds = append(fanSpeeds, xc.FanSpeedLow)
 	}
 	if res.FanMedium() {
-		fanSpeeds = append(fanSpeeds, FanSpeedMedium)
+		fanSpeeds = append(fanSpeeds, xc.FanSpeedMedium)
 	}
 	if res.FanHigh() {
-		fanSpeeds = append(fanSpeeds, FanSpeedHigh)
+		fanSpeeds = append(fanSpeeds, xc.FanSpeedHigh)
 	}
 	if res.FanAuto() {
-		fanSpeeds = append(fanSpeeds, FanSpeedAuto)
+		fanSpeeds = append(fanSpeeds, xc.FanSpeedAuto)
 	}
 	if res.FanCustom() {
 		// Include additional MAX speed if custom speeds are supported
-		fanSpeeds = append(fanSpeeds, FanSpeedMax)
+		fanSpeeds = append(fanSpeeds, xc.FanSpeedMax)
 	}
 	ac.supportedFanSpeeds = fanSpeeds
 
@@ -1273,7 +1074,7 @@ func (ac *AirConditioner) sendCommandsGetResponses(ctx context.Context, commands
 		}
 
 		// Send command
-		responses, err := ac.Device.SendBytes(data)
+		responses, err := ac.SendBytes(ctx, data)
 		if err != nil {
 			return nil, err
 		}
@@ -1293,7 +1094,7 @@ func (ac *AirConditioner) sendCommandsGetResponses(ctx context.Context, commands
 	}
 
 	// Device is supported if online and any supported response is received
-	ac.Device.SetSupported(ac.Device.GetOnline() && len(allResponses) > 0)
+	ac.Device.SetSupported(ac.GetOnline() && len(allResponses) > 0)
 
 	return allResponses, nil
 }
@@ -1325,7 +1126,7 @@ func (ac *AirConditioner) GetCapabilities(ctx context.Context) error {
 		return fmt.Errorf("failed to query capabilities: %w", err)
 	}
 	if response == nil {
-		return fmt.Errorf("failed to query capabilities from device %d", ac.GetID())
+		return fmt.Errorf("failed to query capabilities from device %s", ac.GetID())
 	}
 
 	capsResponse, ok := response.(*CapabilitiesResponse)
@@ -1517,17 +1318,7 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 	cmd.TargetTemperature = ac.targetTemperature
 	cmd.OperationalMode = byte(ac.operationalMode)
 
-	// Handle fan speed - could be FanSpeed or int
-	switch fs := ac.fanSpeed.(type) {
-	case FanSpeed:
-		cmd.FanSpeed = byte(fs)
-	case int:
-		cmd.FanSpeed = byte(fs)
-	case byte:
-		cmd.FanSpeed = fs
-	default:
-		cmd.FanSpeed = byte(FanSpeedAuto)
-	}
+	cmd.FanSpeed = byte(ac.fanSpeed)
 
 	cmd.SwingMode = byte(ac.swingMode)
 	cmd.Eco = ac.eco
@@ -1580,7 +1371,7 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 // This is the Go equivalent of Python's override_capabilities method
 func (ac *AirConditioner) OverrideCapabilities(overrides map[string]interface{}, merge bool) error {
 	// Get supported overrides from parent
-	supportedOverrides := ac.GetSupportedCapabilityOverrides()
+	supportedOverrides := ac.Device.GetSupportedCapabilityOverrides()
 
 	// Convert and apply each override
 	for key, value := range overrides {
@@ -1605,7 +1396,7 @@ func (ac *AirConditioner) OverrideCapabilities(overrides map[string]interface{},
 		}
 
 		// Handle OperationalMode enum overrides
-		if valueType == reflect.TypeOf(OperationalMode(0)) {
+		if valueType == reflect.TypeOf(xc.OperationalMode(0)) {
 			listVal, err := toOperationalModeList(value, merge, ac.supportedOpModes)
 			if err != nil {
 				return fmt.Errorf("'%s': %w", key, err)
@@ -1615,7 +1406,7 @@ func (ac *AirConditioner) OverrideCapabilities(overrides map[string]interface{},
 		}
 
 		// Handle SwingMode enum overrides
-		if valueType == reflect.TypeOf(SwingMode(0)) {
+		if valueType == reflect.TypeOf(xc.SwingMode(0)) {
 			listVal, err := toSwingModeList(value, merge, ac.supportedSwingModes)
 			if err != nil {
 				return fmt.Errorf("'%s': %w", key, err)
@@ -1625,7 +1416,7 @@ func (ac *AirConditioner) OverrideCapabilities(overrides map[string]interface{},
 		}
 
 		// Handle FanSpeed enum overrides
-		if valueType == reflect.TypeOf(FanSpeed(0)) {
+		if valueType == reflect.TypeOf(xc.FanSpeed(0)) {
 			listVal, err := toFanSpeedList(value, merge, ac.supportedFanSpeeds)
 			if err != nil {
 				return fmt.Errorf("'%s': %w", key, err)
@@ -1700,13 +1491,13 @@ func toFloat64(value interface{}) (float64, bool) {
 }
 
 // toOperationalModeList converts a value to a list of OperationalMode
-func toOperationalModeList(value interface{}, merge bool, existing []OperationalMode) ([]OperationalMode, error) {
+func toOperationalModeList(value interface{}, merge bool, existing []xc.OperationalMode) ([]xc.OperationalMode, error) {
 	list, ok := value.([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("must be a list")
 	}
 
-	var modes []OperationalMode
+	var modes []xc.OperationalMode
 	for _, v := range list {
 		name, ok := v.(string)
 		if !ok {
@@ -1720,14 +1511,14 @@ func toOperationalModeList(value interface{}, merge bool, existing []Operational
 	}
 
 	if merge {
-		modeSet := make(map[OperationalMode]bool)
+		modeSet := make(map[xc.OperationalMode]bool)
 		for _, m := range existing {
 			modeSet[m] = true
 		}
 		for _, m := range modes {
 			modeSet[m] = true
 		}
-		modes = make([]OperationalMode, 0, len(modeSet))
+		modes = make([]xc.OperationalMode, 0, len(modeSet))
 		for m := range modeSet {
 			modes = append(modes, m)
 		}
@@ -1737,13 +1528,13 @@ func toOperationalModeList(value interface{}, merge bool, existing []Operational
 }
 
 // toSwingModeList converts a value to a list of SwingMode
-func toSwingModeList(value interface{}, merge bool, existing []SwingMode) ([]SwingMode, error) {
+func toSwingModeList(value interface{}, merge bool, existing []xc.SwingMode) ([]xc.SwingMode, error) {
 	list, ok := value.([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("must be a list")
 	}
 
-	var modes []SwingMode
+	var modes []xc.SwingMode
 	for _, v := range list {
 		name, ok := v.(string)
 		if !ok {
@@ -1757,14 +1548,14 @@ func toSwingModeList(value interface{}, merge bool, existing []SwingMode) ([]Swi
 	}
 
 	if merge {
-		modeSet := make(map[SwingMode]bool)
+		modeSet := make(map[xc.SwingMode]bool)
 		for _, m := range existing {
 			modeSet[m] = true
 		}
 		for _, m := range modes {
 			modeSet[m] = true
 		}
-		modes = make([]SwingMode, 0, len(modeSet))
+		modes = make([]xc.SwingMode, 0, len(modeSet))
 		for m := range modeSet {
 			modes = append(modes, m)
 		}
@@ -1917,54 +1708,54 @@ func toCapabilityFlags(value interface{}, merge bool, existing Capability) (Capa
 }
 
 // Enum name parsing functions
-func parseOperationalModeName(name string) (OperationalMode, error) {
+func parseOperationalModeName(name string) (xc.OperationalMode, error) {
 	switch name {
 	case "AUTO":
-		return OperationalModeAuto, nil
+		return xc.OperationalModeAuto, nil
 	case "COOL":
-		return OperationalModeCool, nil
+		return xc.OperationalModeCool, nil
 	case "DRY":
-		return OperationalModeDry, nil
+		return xc.OperationalModeDry, nil
 	case "HEAT":
-		return OperationalModeHeat, nil
+		return xc.OperationalModeHeat, nil
 	case "FAN_ONLY":
-		return OperationalModeFanOnly, nil
+		return xc.OperationalModeFanOnly, nil
 	case "SMART_DRY":
-		return OperationalModeSmartDry, nil
+		return xc.OperationalModeSmartDry, nil
 	default:
 		return 0, fmt.Errorf("invalid OperationalMode name: %s", name)
 	}
 }
 
-func parseSwingModeName(name string) (SwingMode, error) {
+func parseSwingModeName(name string) (xc.SwingMode, error) {
 	switch name {
 	case "OFF":
-		return SwingModeOff, nil
+		return xc.SwingModeOff, nil
 	case "VERTICAL":
-		return SwingModeVertical, nil
+		return xc.SwingModeVertical, nil
 	case "HORIZONTAL":
-		return SwingModeHorizontal, nil
+		return xc.SwingModeHorizontal, nil
 	case "BOTH":
-		return SwingModeBoth, nil
+		return xc.SwingModeBoth, nil
 	default:
 		return 0, fmt.Errorf("invalid SwingMode name: %s", name)
 	}
 }
 
-func parseFanSpeedName(name string) (FanSpeed, error) {
+func parseFanSpeedName(name string) (xc.FanSpeed, error) {
 	switch name {
 	case "AUTO":
-		return FanSpeedAuto, nil
+		return xc.FanSpeedAuto, nil
 	case "MAX":
-		return FanSpeedMax, nil
+		return xc.FanSpeedMax, nil
 	case "HIGH":
-		return FanSpeedHigh, nil
+		return xc.FanSpeedHigh, nil
 	case "MEDIUM":
-		return FanSpeedMedium, nil
+		return xc.FanSpeedMedium, nil
 	case "LOW":
-		return FanSpeedLow, nil
+		return xc.FanSpeedLow, nil
 	case "SILENT":
-		return FanSpeedSilent, nil
+		return xc.FanSpeedSilent, nil
 	default:
 		return 0, fmt.Errorf("invalid FanSpeed name: %s", name)
 	}
@@ -2068,8 +1859,11 @@ func (ac *AirConditioner) SetBeep(tone bool) {
 }
 
 // PowerState returns the power state
-func (ac *AirConditioner) PowerState() *bool {
-	return ac.powerState
+func (ac *AirConditioner) PowerState() bool {
+	if ac.powerState != nil {
+		return *ac.powerState
+	}
+	return false
 }
 
 // SetPowerState sets the power state
@@ -2108,27 +1902,33 @@ func (ac *AirConditioner) SetTargetTemperature(temp float64) {
 }
 
 // IndoorTemperature returns the indoor temperature
-func (ac *AirConditioner) IndoorTemperature() *float64 {
-	return ac.indoorTemperature
+func (ac *AirConditioner) IndoorTemperature() float64 {
+	if ac.indoorTemperature != nil {
+		return *ac.indoorTemperature
+	}
+	return 0
 }
 
 // OutdoorTemperature returns the outdoor temperature
-func (ac *AirConditioner) OutdoorTemperature() *float64 {
-	return ac.outdoorTemperature
+func (ac *AirConditioner) OutdoorTemperature() float64 {
+	if ac.outdoorTemperature != nil {
+		return *ac.outdoorTemperature
+	}
+	return 0
 }
 
 // SupportedOperationModes returns the supported operation modes
-func (ac *AirConditioner) SupportedOperationModes() []OperationalMode {
+func (ac *AirConditioner) SupportedOperationModes() []xc.OperationalMode {
 	return ac.supportedOpModes
 }
 
 // OperationalMode returns the current operational mode
-func (ac *AirConditioner) OperationalMode() OperationalMode {
+func (ac *AirConditioner) OperationalMode() xc.OperationalMode {
 	return ac.operationalMode
 }
 
 // SetOperationalMode sets the operational mode
-func (ac *AirConditioner) SetOperationalMode(mode OperationalMode) {
+func (ac *AirConditioner) SetOperationalMode(mode xc.OperationalMode) {
 	ac.operationalMode = mode
 }
 
@@ -2149,16 +1949,12 @@ func (ac *AirConditioner) SupportsCustomFanSpeed() bool {
 }
 
 // FanSpeed returns the current fan speed
-func (ac *AirConditioner) FanSpeed() interface{} {
+func (ac *AirConditioner) FanSpeed() xc.FanSpeed {
 	return ac.fanSpeed
 }
 
 // SetFanSpeed sets the fan speed
-func (ac *AirConditioner) SetFanSpeed(speed interface{}) {
-	// Convert float to int as needed
-	if f, ok := speed.(float64); ok {
-		speed = int(f)
-	}
+func (ac *AirConditioner) SetFanSpeed(speed xc.FanSpeed) {
 	ac.fanSpeed = speed
 }
 
@@ -2251,17 +2047,17 @@ func (ac *AirConditioner) SetBreezeless(enable bool) {
 }
 
 // SupportedSwingModes returns the supported swing modes
-func (ac *AirConditioner) SupportedSwingModes() []SwingMode {
+func (ac *AirConditioner) SupportedSwingModes() []xc.SwingMode {
 	return ac.supportedSwingModes
 }
 
 // SwingMode returns the current swing mode
-func (ac *AirConditioner) SwingMode() SwingMode {
+func (ac *AirConditioner) SwingMode() xc.SwingMode {
 	return ac.swingMode
 }
 
 // SetSwingMode sets the swing mode
-func (ac *AirConditioner) SetSwingMode(mode SwingMode) {
+func (ac *AirConditioner) SetSwingMode(mode xc.SwingMode) {
 	ac.swingMode = mode
 }
 
@@ -2703,14 +2499,14 @@ func (ac *AirConditioner) CapabilitiesDict() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"min_target_temperature":   ac.minTargetTemperature,
-		"max_target_temperature":   ac.maxTargetTemperature,
-		"supported_modes":          ac.supportedOpModes,
-		"supported_swing_modes":    ac.supportedSwingModes,
-		"supported_fan_speeds":     ac.supportedFanSpeeds,
-		"supported_aux_modes":      ac.supportedAuxModes,
-		"supported_rate_selects":   ac.supportedRateSelects,
-		"additional_capabilities":  flags,
+		"min_target_temperature":  ac.minTargetTemperature,
+		"max_target_temperature":  ac.maxTargetTemperature,
+		"supported_modes":         ac.supportedOpModes,
+		"supported_swing_modes":   ac.supportedSwingModes,
+		"supported_fan_speeds":    ac.supportedFanSpeeds,
+		"supported_aux_modes":     ac.supportedAuxModes,
+		"supported_rate_selects":  ac.supportedRateSelects,
+		"additional_capabilities": flags,
 	}
 }
 
@@ -2840,6 +2636,76 @@ func (ac *AirConditioner) RealTimePowerUsage() *float64 {
 		format = EnergyDataFormatBinary
 	}
 	return ac.GetRealTimePowerUsage(format)
+}
+
+//////////////////////////////////////
+
+func (ac *AirConditioner) Authenticate(ctx context.Context, token device.Token, key device.Key) error {
+	return ac.Device.Authenticate(ctx, token, key)
+}
+
+// AuthenticateFromPreset implements [device.Device].
+func (ac *AirConditioner) AuthenticateFromPreset(ctx context.Context) (bool, error) {
+	return ac.Device.AuthenticateFromPreset(ctx)
+}
+
+// GetID implements [device.Device].
+func (ac *AirConditioner) GetID() string { return ac.Device.GetID() }
+
+// GetIP implements [device.Device].
+func (ac *AirConditioner) GetIP() string { return ac.Device.GetIP() }
+
+// GetName implements [device.Device].
+func (ac *AirConditioner) GetName() string { return ac.Device.GetName() }
+
+// GetOnline implements [device.Device].
+func (ac *AirConditioner) GetOnline() bool {
+	return ac.Device.GetOnline()
+}
+
+// GetPort implements [device.Device].
+func (ac *AirConditioner) GetPort() int {
+	return ac.Device.GetPort()
+}
+
+// GetSN implements [device.Device].
+func (ac *AirConditioner) GetSN() string {
+	return ac.Device.GetSN()
+}
+
+// GetSupported implements [device.Device].
+func (ac *AirConditioner) GetSupported() bool {
+	return ac.Device.GetSupported()
+}
+
+// GetType implements [device.Device].
+func (ac *AirConditioner) GetType() device.DeviceType {
+	return ac.Device.GetType()
+}
+
+// GetVersion implements [device.Device].
+func (ac *AirConditioner) GetVersion() int {
+	return ac.Device.GetVersion()
+}
+
+// SendBytes implements [device.Device].
+func (ac *AirConditioner) SendBytes(ctx context.Context, data []byte) ([][]byte, error) {
+	return ac.Device.SendBytes(ctx, data)
+}
+
+// SetMaxConnectionLifetime implements [device.Device].
+func (ac *AirConditioner) SetMaxConnectionLifetime(seconds *int) {
+	ac.Device.SetMaxConnectionLifetime(seconds)
+}
+
+// GetKeyInfo implements [device.DeviceAuthV3].
+func (ac *AirConditioner) GetKeyInfo() (device.Token, device.Key, device.LocalKey, time.Time) {
+	return ac.Device.GetKeyInfo()
+}
+
+// IsAuthenticated implements [device.DeviceAuthV3].
+func (ac *AirConditioner) IsAuthenticated() bool {
+	return ac.Device.IsAuthenticated()
 }
 
 // ============================================================================

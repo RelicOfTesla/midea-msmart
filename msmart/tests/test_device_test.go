@@ -7,6 +7,7 @@ import (
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 	"github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
+	"github.com/RelicOfTesla/midea-msmart/msmart/device/xc"
 )
 
 // ============================================================================
@@ -53,7 +54,7 @@ func TestSendCommand_ProtocolError(t *testing.T) {
 // This is a translation of Python's TestOverrideCapabilities.test_unsupported_override
 func TestOverrideCapabilities_UnsupportedOverride(t *testing.T) {
 	// Create dummy device which defaults to no overrides
-	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("0", 0, "0", msmart.DeviceTypeAirConditioner)
 
 	// Try to override with unsupported capability
 	err := device.OverrideCapabilities(map[string]interface{}{
@@ -70,7 +71,7 @@ func TestOverrideCapabilities_UnsupportedOverride(t *testing.T) {
 // This is a translation of Python's TestOverrideCapabilities.test_numeric_invalid
 func TestOverrideCapabilities_NumericInvalid(t *testing.T) {
 	// Create dummy device
-	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("0", 0, "0", msmart.DeviceTypeAirConditioner)
 
 	// Set up supported capability overrides for numeric values
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
@@ -105,13 +106,13 @@ func TestOverrideCapabilities_NumericInvalid(t *testing.T) {
 // This is a translation of Python's TestOverrideCapabilities.test_enums_invalid_name
 func TestOverrideCapabilities_EnumsInvalidName(t *testing.T) {
 	// Create dummy device
-	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("0", 0, "0", msmart.DeviceTypeAirConditioner)
 
 	// Set up supported capability overrides with the real OperationalMode enum type
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"supported_modes": {
 			AttrName:  "supportedModes",
-			ValueType: reflect.TypeOf(ac.OperationalMode(0)),
+			ValueType: reflect.TypeOf(xc.OperationalMode(0)),
 		},
 	})
 
@@ -130,7 +131,7 @@ func TestOverrideCapabilities_EnumsInvalidName(t *testing.T) {
 // This is a translation of Python's TestOverrideCapabilities.test_enums_invalid_format
 func TestOverrideCapabilities_EnumsInvalidFormat(t *testing.T) {
 	// Create dummy device
-	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("0", 0, "0", msmart.DeviceTypeAirConditioner)
 
 	// Set up supported capability overrides with the real enum type
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
@@ -174,13 +175,13 @@ func TestOverrideCapabilities_EnumsInvalidFormat(t *testing.T) {
 // This is a translation of Python's TestOverrideCapabilities.test_enum
 func TestOverrideCapabilities_Enum(t *testing.T) {
 	// Create dummy device
-	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("0", 0, "0", msmart.DeviceTypeAirConditioner)
 
 	// Set up supported capability overrides with the real OperationalMode enum type
 	device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"supported_modes": {
 			AttrName:  "supportedModes",
-			ValueType: reflect.TypeOf(ac.OperationalMode(0)),
+			ValueType: reflect.TypeOf(xc.OperationalMode(0)),
 		},
 	})
 
@@ -202,7 +203,7 @@ func TestOverrideCapabilities_Enum(t *testing.T) {
 // This is a translation of Python's TestOverrideCapabilities.test_flags
 func TestOverrideCapabilities_Flag(t *testing.T) {
 	// Create dummy device
-	device := msmart.NewDevice("0", 0, 0, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("0", 0, "0", msmart.DeviceTypeAirConditioner)
 
 	// Create a CapabilityManager to store flags
 	cm := msmart.NewCapabilityManager(0)
@@ -242,7 +243,8 @@ func TestConstruct_AC(t *testing.T) {
 	// In Go, Construct returns a *Device, not specific device types
 	// The Go implementation is simpler and doesn't have the same class hierarchy
 
-	device := msmart.Construct(
+	device := msmart.NewBaseDevice(
+		"", 0, "",
 		msmart.DeviceTypeAirConditioner,
 		msmart.WithName("net_ac_63BA"),
 		msmart.WithSN("000000P0000000Q1B88C29C963BA0000"),
@@ -266,12 +268,12 @@ func TestConstruct_AC(t *testing.T) {
 	}
 
 	sn := device.GetSN()
-	if sn == nil || *sn != "000000P0000000Q1B88C29C963BA0000" {
+	if sn != "000000P0000000Q1B88C29C963BA0000" {
 		t.Errorf("Expected SN '000000P0000000Q1B88C29C963BA0000', got %v", sn)
 	}
 
 	name := device.GetName()
-	if name == nil || *name != "net_ac_63BA" {
+	if name != "net_ac_63BA" {
 		t.Errorf("Expected name 'net_ac_63BA', got %v", name)
 	}
 }
@@ -280,7 +282,8 @@ func TestConstruct_AC(t *testing.T) {
 // This is a translation of Python's TestConstruct.test_construct_cc
 func TestConstruct_CC(t *testing.T) {
 	sn := "000000"
-	device := msmart.Construct(
+	device := msmart.NewBaseDevice(
+		"", 0, "",
 		msmart.DeviceTypeCommercialAC,
 		msmart.WithSN(sn),
 	)
@@ -295,7 +298,7 @@ func TestConstruct_CC(t *testing.T) {
 	}
 
 	deviceSN := device.GetSN()
-	if deviceSN == nil || *deviceSN != sn {
+	if deviceSN != sn {
 		t.Errorf("Expected SN '%s', got %v", sn, deviceSN)
 	}
 }
@@ -307,7 +310,8 @@ func TestConstruct_Unsupported(t *testing.T) {
 	unsupportedType := msmart.DeviceType(0xBD)
 	sn := "12345"
 
-	device := msmart.Construct(
+	device := msmart.NewBaseDevice(
+		"", 0, "",
 		unsupportedType,
 		msmart.WithSN(sn),
 	)
@@ -322,7 +326,7 @@ func TestConstruct_Unsupported(t *testing.T) {
 	}
 
 	deviceSN := device.GetSN()
-	if deviceSN == nil || *deviceSN != sn {
+	if deviceSN != sn {
 		t.Errorf("Expected SN '%s', got %v", sn, deviceSN)
 	}
 }
@@ -335,9 +339,9 @@ func TestConstruct_Unsupported(t *testing.T) {
 func TestDevice_NewDevice(t *testing.T) {
 	ip := "192.168.1.100"
 	port := 6444
-	deviceID := 123456789
+	deviceID := "123456789"
 
-	device := msmart.NewDevice(ip, port, deviceID, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice(ip, port, deviceID, msmart.DeviceTypeAirConditioner)
 
 	if device == nil {
 		t.Fatal("Expected device to be non-nil")
@@ -352,7 +356,7 @@ func TestDevice_NewDevice(t *testing.T) {
 	}
 
 	if device.GetID() != deviceID {
-		t.Errorf("Expected ID %d, got %d", deviceID, device.GetID())
+		t.Errorf("Expected ID %s, got %s", deviceID, device.GetID())
 	}
 
 	if device.GetType() != msmart.DeviceTypeAirConditioner {
@@ -366,10 +370,10 @@ func TestDevice_WithOptions(t *testing.T) {
 	name := "Test Device"
 	version := 2
 
-	device := msmart.NewDevice(
+	device := msmart.NewBaseDevice(
 		"192.168.1.100",
 		6444,
-		123456789,
+		"123456789",
 		msmart.DeviceTypeAirConditioner,
 		msmart.WithSN(sn),
 		msmart.WithName(name),
@@ -381,27 +385,27 @@ func TestDevice_WithOptions(t *testing.T) {
 	}
 
 	deviceSN := device.GetSN()
-	if deviceSN == nil || *deviceSN != sn {
+	if deviceSN != sn {
 		t.Errorf("Expected SN '%s', got %v", sn, deviceSN)
 	}
 
 	deviceName := device.GetName()
-	if deviceName == nil || *deviceName != name {
+	if deviceName != name {
 		t.Errorf("Expected name '%s', got %v", name, deviceName)
 	}
 
 	deviceVersion := device.GetVersion()
-	if deviceVersion == nil || *deviceVersion != version {
+	if deviceVersion != version {
 		t.Errorf("Expected version %d, got %v", version, deviceVersion)
 	}
 }
 
 // TestDevice_ToDict tests the ToDict method
 func TestDevice_ToDict(t *testing.T) {
-	device := msmart.NewDevice(
+	device := msmart.NewBaseDevice(
 		"192.168.1.100",
 		6444,
-		123456789,
+		"123456789",
 		msmart.DeviceTypeAirConditioner,
 		msmart.WithSN("test_sn"),
 		msmart.WithName("Test Device"),
@@ -417,8 +421,8 @@ func TestDevice_ToDict(t *testing.T) {
 		t.Errorf("Expected port 6444, got %v", dict["port"])
 	}
 
-	if dict["id"] != 123456789 {
-		t.Errorf("Expected id 123456789, got %v", dict["id"])
+	if dict["id"] != "123456789" {
+		t.Errorf("Expected id '123456789', got %v", dict["id"])
 	}
 
 	if dict["type"] != msmart.DeviceTypeAirConditioner {
@@ -436,7 +440,7 @@ func TestDevice_ToDict(t *testing.T) {
 
 // TestDevice_OnlineSupported tests online and supported flags
 func TestDevice_OnlineSupported(t *testing.T) {
-	device := msmart.NewDevice("192.168.1.100", 6444, 123456789, msmart.DeviceTypeAirConditioner)
+	device := msmart.NewBaseDevice("192.168.1.100", 6444, "123456789", msmart.DeviceTypeAirConditioner)
 
 	// Initial state
 	if device.GetOnline() {

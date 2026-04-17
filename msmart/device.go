@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/RelicOfTesla/midea-msmart/msmart/device"
 )
 
 // Global LAN cache to reuse authenticated connections
@@ -18,34 +21,39 @@ var (
 )
 
 // getLANCacheKey generates a cache key from IP and device ID
-func getLANCacheKey(ip string, deviceID int) string {
+func getLANCacheKey(ip string, deviceID LanDeviceId) string {
 	return fmt.Sprintf("%s:%d", ip, deviceID)
 }
 
-// Device represents a base device
+// DeviceBase represents a base device implementation
 // This is a translation of Python's Device class from base_device.py
-type Device struct {
+type DeviceBase struct {
 	// Private fields (using lowercase naming convention in Go)
 	ip         string
 	port       int
-	id         int
-	deviceType DeviceType
-	sn         *string
-	name       *string
-	version    *int
+	id         string
+	deviceType device.DeviceType
+	sn         string
+	name       string
+	version    int
 	lan        *LAN
 	supported  bool
 	online     bool
 
 	// Pre-set token and key for V3 devices (to skip cloud authentication)
-	presetToken []byte
-	presetKey   []byte
+	presetToken           device.Token
+	presetKey             device.Key
+	presetLocalKey        device.LocalKey
+	presetLocalKeyExpired *time.Time
 
 	// Supported capability overrides map
 	// In Python: dict[str, tuple[str, type]]
 	// In Go: map[string]CapabilityOverrideInfo
 	supportedCapabilityOverrides map[string]CapabilityOverrideInfo
 }
+
+var _ device.Device = (*DeviceBase)(nil)
+var _ device.DeviceAuthV3 = (*DeviceBase)(nil)
 
 // CapabilityOverrideInfo stores information about capability overrides
 type CapabilityOverrideInfo struct {
@@ -54,22 +62,28 @@ type CapabilityOverrideInfo struct {
 	IsFlag    bool // true if this is a Flag type (bitwise OR merging)
 }
 
-// DeviceOption is a functional option for Device configuration
-type DeviceOption func(*Device)
-
-// NewDevice creates a new Device instance
+// NewBaseDevice creates a new DeviceBase instance
 // This is the equivalent of Python's __init__ method
-func NewDevice(ip string, port int, deviceID int, deviceType DeviceType, opts ...DeviceOption) *Device {
-	d := &Device{
+func NewBaseDevice(ip string, port int, _id string, deviceType device.DeviceType, opts ...device.DeviceOption) *DeviceBase {
+	d := &DeviceBase{
 		ip:                           ip,
 		port:                         port,
-		id:                           deviceID,
+		id:                           _id,
 		deviceType:                   deviceType,
 		supported:                    false,
 		online:                       false,
 		supportedCapabilityOverrides: make(map[string]CapabilityOverrideInfo),
 	}
 
+	// Apply optional parameters
+	cfg := device.ApplyOptions(opts...)
+
+	deviceId64, err := strconv.ParseInt(_id, 10, 64)
+	if err != nil {
+		slog.Warn("invalid device ID, using 0", "id", _id, "error", err)
+		deviceId64 = 0
+	}
+	deviceID := LanDeviceId(deviceId64)
 	// Try to reuse cached LAN object
 	lanCacheMu.Lock()
 	cacheKey := getLANCacheKey(ip, deviceID)
@@ -80,62 +94,50 @@ func NewDevice(ip string, port int, deviceID int, deviceType DeviceType, opts ..
 			lanCacheMu.Unlock()
 		} else {
 			// Cached LAN is not usable, create new one
-			d.lan = NewLAN(ip, port, int64(deviceID))
+			d.lan = NewLAN(ip, port, deviceID, cfg.LocalKey, cfg.GetLocalKeyExpired())
 			lanCache[cacheKey] = d.lan
 			lanCacheMu.Unlock()
 		}
 	} else {
 		// No cached LAN, create new one
-		d.lan = NewLAN(ip, port, int64(deviceID))
+		d.lan = NewLAN(ip, port, deviceID, cfg.LocalKey, cfg.GetLocalKeyExpired())
 		lanCache[cacheKey] = d.lan
 		lanCacheMu.Unlock()
 	}
 
-	// Apply optional parameters
-	for _, opt := range opts {
-		opt(d)
+	if cfg.SN != nil {
+		d.sn = *cfg.SN
+	}
+	if cfg.Name != nil {
+		d.name = *cfg.Name
+	}
+	if cfg.Version != nil {
+		d.version = *cfg.Version
+	}
+	if len(cfg.PresetToken) > 0 {
+		d.presetToken = cfg.PresetToken
+	}
+	if len(cfg.PresetKey) > 0 {
+		d.presetKey = cfg.PresetKey
+	}
+	if len(cfg.LocalKey) > 0 {
+		d.presetLocalKey = cfg.LocalKey
+	}
+	if cfg.LocalKeyExpired != nil {
+		d.presetLocalKeyExpired = cfg.LocalKeyExpired
 	}
 
 	return d
 }
 
-// WithSN sets the serial number
-func WithSN(sn string) DeviceOption {
-	return func(d *Device) {
-		d.sn = &sn
-	}
-}
-
-// WithName sets the device name
-func WithName(name string) DeviceOption {
-	return func(d *Device) {
-		d.name = &name
-	}
-}
-
-// WithVersion sets the device version
-func WithVersion(version int) DeviceOption {
-	return func(d *Device) {
-		d.version = &version
-	}
-}
-
-// WithTokenKey sets the pre-set token and key for V3 devices
-func WithTokenKey(token, key []byte) DeviceOption {
-	return func(d *Device) {
-		d.presetToken = token
-		d.presetKey = key
-	}
-}
-
 // SendCommand sends a command to the device and returns any responses
 // This is the equivalent of Python's _send_command method
-func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
+func (d *DeviceBase) SendCommand(ctx context.Context, command *Frame) ([][]byte, error) {
 	data := command.ToBytes(nil)
 	verboseLog("Sending command to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
 
 	start := time.Now()
-	responses, err := d.lan.Send(data, Retries)
+	responses, err := d.lan.Send(ctx, data, Retries)
 	if err != nil {
 		if _, ok := err.(*ProtocolError); ok {
 			slog.Error("Network error", "ip", d.ip, "port", d.port, "error", err)
@@ -156,11 +158,11 @@ func (d *Device) SendCommand(command *Frame) ([][]byte, error) {
 
 // SendBytes sends raw bytes to the device and returns any responses
 // This is used by sub-packages that have their own command serialization
-func (d *Device) SendBytes(data []byte) ([][]byte, error) {
+func (d *DeviceBase) SendBytes(ctx context.Context, data []byte) ([][]byte, error) {
 	verboseLog("Sending bytes to %s:%d: %s", d.ip, d.port, hex.EncodeToString(data))
 
 	start := time.Now()
-	responses, err := d.lan.Send(data, Retries)
+	responses, err := d.lan.Send(ctx, data, Retries)
 	if err != nil {
 		if _, ok := err.(*ProtocolError); ok {
 			slog.Error("Network error", "ip", d.ip, "port", d.port, "error", err)
@@ -180,33 +182,38 @@ func (d *Device) SendBytes(data []byte) ([][]byte, error) {
 }
 
 // SetOnline sets the online status
-func (d *Device) SetOnline(online bool) {
+func (d *DeviceBase) SetOnline(online bool) {
 	d.online = online
 }
 
 // SetSupported sets the supported status
-func (d *Device) SetSupported(supported bool) {
+func (d *DeviceBase) SetSupported(supported bool) {
 	d.supported = supported
 }
 
 // Refresh refreshes the device state
 // This is the equivalent of Python's async refresh method
 // Returns an error to indicate it must be implemented by subclasses
-func (d *Device) Refresh(context.Context) error {
+func (d *DeviceBase) Refresh(context.Context) error {
 	return fmt.Errorf("not implemented")
 }
 
 // Apply applies device configuration
 // This is the equivalent of Python's async apply method
 // Returns an error to indicate it must be implemented by subclasses
-func (d *Device) Apply() error {
+func (d *DeviceBase) Apply(ctx context.Context) error {
+	return fmt.Errorf("not implemented")
+}
+
+// GetCapabilities implements [device.Device].
+func (d *DeviceBase) GetCapabilities(ctx context.Context) error {
 	return fmt.Errorf("not implemented")
 }
 
 // Authenticate authenticates with a V3 device
 // This is the equivalent of Python's async authenticate method
-func (d *Device) Authenticate(token Token, key Key) error {
-	err := d.lan.Authenticate(token, key, Retries)
+func (d *DeviceBase) Authenticate(ctx context.Context, token device.Token, key device.Key) error {
+	err := d.lan.Authenticate(ctx, token, key, Retries)
 	if err != nil {
 		if _, ok := err.(*ProtocolError); ok {
 			return &AuthenticationError{Cause: err}
@@ -219,114 +226,81 @@ func (d *Device) Authenticate(token Token, key Key) error {
 	return nil
 }
 
-// GetLocalKey returns the current local key and its expiration time
-// Returns nil if not authenticated or no local key is set
-func (d *Device) GetLocalKey() ([]byte, time.Time) {
-	if d.lan == nil {
-		return nil, time.Time{}
-	}
-	return d.lan.GetLocalKey()
-}
-
-// SetLocalKey sets the local key and expiration time directly
-// This allows reusing a cached local key without re-authenticating
-// Returns true if the key was set successfully, false if expired
-func (d *Device) SetLocalKey(localKey []byte, expiration time.Time) bool {
-	if d.lan == nil {
-		return false
-	}
-	return d.lan.SetLocalKey(localKey, expiration)
-}
-
 // IsAuthenticated checks if the device is authenticated (for V3 devices)
-func (d *Device) IsAuthenticated() bool {
+func (d *DeviceBase) IsAuthenticated() bool {
 	return d.lan != nil && d.lan.IsAuthenticated()
 }
 
 // SetMaxConnectionLifetime sets the maximum connection lifetime of the LAN protocol
-func (d *Device) SetMaxConnectionLifetime(seconds *int) {
+func (d *DeviceBase) SetMaxConnectionLifetime(seconds *int) {
 	d.lan.SetMaxConnectionLifetime(seconds)
 }
 
 // GetIP returns the device IP address
 // This is the equivalent of Python's @property def ip(self)
-func (d *Device) GetIP() string {
+func (d *DeviceBase) GetIP() string {
 	return d.ip
 }
 
 // GetPort returns the device port
 // This is the equivalent of Python's @property def port(self)
-func (d *Device) GetPort() int {
+func (d *DeviceBase) GetPort() int {
 	return d.port
 }
 
 // GetID returns the device ID
 // This is the equivalent of Python's @property def id(self)
-func (d *Device) GetID() int {
+func (d *DeviceBase) GetID() string {
 	return d.id
 }
 
-// GetToken returns the device token as a hex string
-// This is the equivalent of Python's @property def token(self)
-func (d *Device) GetToken() *string {
-	token := d.lan.Token()
-	if token == nil {
-		return nil
-	}
-	hexToken := hex.EncodeToString(token)
-	return &hexToken
-}
-
-// GetKey returns the device key as a hex string
-// This is the equivalent of Python's @property def key(self)
-func (d *Device) GetKey() *string {
-	key := d.lan.Key()
-	if key == nil {
-		return nil
-	}
-	hexKey := hex.EncodeToString(key)
-	return &hexKey
+// GetKeyInfo implements [device.DeviceAuthV3].
+func (d *DeviceBase) GetKeyInfo() (token device.Token, key device.Key, localKey device.LocalKey, expired time.Time) {
+	token = d.lan.Token()
+	key = d.lan.Key()
+	localKey, expired = d.lan.GetLocalKey()
+	return
 }
 
 // GetType returns the device type
 // This is the equivalent of Python's @property def type(self)
-func (d *Device) GetType() DeviceType {
+func (d *DeviceBase) GetType() device.DeviceType {
 	return d.deviceType
 }
 
 // GetName returns the device name
 // This is the equivalent of Python's @property def name(self)
-func (d *Device) GetName() *string {
+func (d *DeviceBase) GetName() string {
 	return d.name
 }
 
 // GetSN returns the device serial number
 // This is the equivalent of Python's @property def sn(self)
-func (d *Device) GetSN() *string {
+func (d *DeviceBase) GetSN() string {
 	return d.sn
 }
 
 // GetVersion returns the device version
 // This is the equivalent of Python's @property def version(self)
-func (d *Device) GetVersion() *int {
+func (d *DeviceBase) GetVersion() int {
 	return d.version
 }
 
 // GetOnline returns whether the device is online
 // This is the equivalent of Python's @property def online(self)
-func (d *Device) GetOnline() bool {
+func (d *DeviceBase) GetOnline() bool {
 	return d.online
 }
 
 // GetSupported returns whether the device is supported
 // This is the equivalent of Python's @property def supported(self)
-func (d *Device) GetSupported() bool {
+func (d *DeviceBase) GetSupported() bool {
 	return d.supported
 }
 
 // ToDict returns the device as a dictionary
 // This is the equivalent of Python's to_dict method
-func (d *Device) ToDict() map[string]interface{} {
+func (d *DeviceBase) ToDict() map[string]interface{} {
 	result := map[string]interface{}{
 		"ip":        d.ip,
 		"port":      d.port,
@@ -337,28 +311,25 @@ func (d *Device) ToDict() map[string]interface{} {
 	}
 
 	// Handle optional fields
-	if d.name != nil {
-		result["name"] = *d.name
-	} else {
-		result["name"] = nil
+	if d.name != "" {
+		result["name"] = d.name
+	}
+	if d.sn != "" {
+		result["sn"] = d.sn
 	}
 
-	if d.sn != nil {
-		result["sn"] = *d.sn
-	} else {
-		result["sn"] = nil
+	token, key, localKey, expired := d.GetKeyInfo()
+	if len(key) > 0 {
+		result["key"] = hex.EncodeToString(key)
 	}
-
-	if d.GetKey() != nil {
-		result["key"] = *d.GetKey()
-	} else {
-		result["key"] = nil
+	if len(token) > 0 {
+		result["token"] = hex.EncodeToString(token)
 	}
-
-	if d.GetToken() != nil {
-		result["token"] = *d.GetToken()
-	} else {
-		result["token"] = nil
+	if len(localKey) > 0 {
+		result["localKey"] = hex.EncodeToString(localKey)
+	}
+	if len(localKey) > 0 {
+		result["localKeyExpired"] = expired.Format(time.RFC3339)
 	}
 
 	return result
@@ -367,23 +338,20 @@ func (d *Device) ToDict() map[string]interface{} {
 // CapabilitiesDict returns the device capabilities as a dictionary
 // This is the equivalent of Python's async capabilities_dict method
 // Returns an error to indicate it must be implemented by subclasses
-func (d *Device) CapabilitiesDict() (map[string]interface{}, error) {
-	return nil, fmt.Errorf("not implemented")
+func (d *DeviceBase) CapabilitiesDict() map[string]interface{} {
+	return nil
 }
 
 // String returns the string representation of the device
 // This is the equivalent of Python's __str__ method
-func (d *Device) String() string {
+func (d *DeviceBase) String() string {
 	return fmt.Sprintf("%v", d.ToDict())
 }
 
 // SerializeCapabilities dumps device capabilities as an easily serializable dict
 // This is the equivalent of Python's serialize_capabilities method
-func (d *Device) SerializeCapabilities() (map[string]interface{}, error) {
-	capabilities, err := d.CapabilitiesDict()
-	if err != nil {
-		return nil, err
-	}
+func (d *DeviceBase) SerializeCapabilities() (map[string]interface{}, error) {
+	capabilities := d.CapabilitiesDict()
 	result := serialize(capabilities)
 	if m, ok := result.(map[string]interface{}); ok {
 		return m, nil
@@ -446,7 +414,7 @@ type EnumNameResolver interface {
 
 // OverrideCapabilities overrides device capabilities via serialized dict
 // This is the equivalent of Python's override_capabilities method
-func (d *Device) OverrideCapabilities(overrides map[string]interface{}, merge bool) error {
+func (d *DeviceBase) OverrideCapabilities(overrides map[string]interface{}, merge bool) error {
 	// Get supported overrides
 	supportedOverrides := d.supportedCapabilityOverrides
 
@@ -516,7 +484,7 @@ func (d *Device) OverrideCapabilities(overrides map[string]interface{}, merge bo
 }
 
 // applyFlagOverride handles Flag enum types with bitwise OR merging
-func (d *Device) applyFlagOverride(attrName string, valueType reflect.Type, names []interface{}, merge bool, field reflect.Value) error {
+func (d *DeviceBase) applyFlagOverride(attrName string, valueType reflect.Type, names []interface{}, merge bool, field reflect.Value) error {
 	// Convert names to flag values using reflection
 	// We need to find the GetFromName method on the type
 	flags := reflect.New(valueType).Elem()
@@ -649,7 +617,7 @@ func (d *Device) applyFlagOverride(attrName string, valueType reflect.Type, name
 }
 
 // applyEnumOverride handles regular enum types
-func (d *Device) applyEnumOverride(attrName string, valueType reflect.Type, names []interface{}, merge bool, field reflect.Value) error {
+func (d *DeviceBase) applyEnumOverride(attrName string, valueType reflect.Type, names []interface{}, merge bool, field reflect.Value) error {
 	// Convert names to enum values using reflection
 	var members []interface{}
 
@@ -803,22 +771,25 @@ func toFloat(value interface{}) (float64, bool) {
 	}
 }
 
-// Construct constructs a device object based on the provided device type
-// This is the equivalent of Python's @classmethod construct
-// In Go, we use a function instead of a class method
-func Construct(deviceType DeviceType, opts ...DeviceOption) *Device {
-	// In the original Python code, this creates different device types
-	// (AirConditioner, CommercialAirConditioner) based on deviceType
-	// For this translation, we just return a generic Device
-	return NewDevice("", 0, 0, deviceType, opts...)
-}
-
 // GetSupportedCapabilityOverrides returns the supported capability overrides map
-func (d *Device) GetSupportedCapabilityOverrides() map[string]CapabilityOverrideInfo {
+func (d *DeviceBase) GetSupportedCapabilityOverrides() map[string]CapabilityOverrideInfo {
 	return d.supportedCapabilityOverrides
 }
 
 // SetSupportedCapabilityOverrides sets the supported capability overrides map
-func (d *Device) SetSupportedCapabilityOverrides(overrides map[string]CapabilityOverrideInfo) {
+func (d *DeviceBase) SetSupportedCapabilityOverrides(overrides map[string]CapabilityOverrideInfo) {
 	d.supportedCapabilityOverrides = overrides
+}
+
+func (d *DeviceBase) AuthenticateFromPreset(ctx context.Context) (bool, error) {
+	if d.presetToken != nil && d.presetKey != nil {
+		verboseLog("Using pre-set token/key for V3 device authentication (skipping cloud)")
+		if err := d.Authenticate(ctx, d.presetToken, d.presetKey); err != nil {
+			verboseLog("Pre-set token/key authentication failed: %v", err)
+			// Fall through to cloud authentication
+		} else {
+			return true, nil
+		}
+	}
+	return false, nil
 }

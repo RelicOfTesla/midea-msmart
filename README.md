@@ -444,6 +444,106 @@ midea temp 客厅 24
 2. 检查网络连接
 3. 尝试使用 `-v` 参数配合AI查看详细日志
 
+## 📚 作为库使用
+
+msmart 可以作为 Go 库集成到你的项目中。
+
+### 基本用法
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/RelicOfTesla/midea-msmart/msmart"
+    "github.com/RelicOfTesla/midea-msmart/msmart/device/ac"
+)
+
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+
+    // 方法 1: 从配置创建设备
+    cfg := &ac.DeviceConfig{
+        IP:      "192.168.1.60",
+        Port:    6444,
+        ID:      "123456789",
+        Name:    "客厅",
+        Version: 3,
+        Token:   "your_token_hex",
+        Key:     "your_key_hex",
+    }
+    device, err := ac.NewDeviceFromConfig(cfg)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 方法 2: 直接连接
+    // device, err := ac.NewDeviceDirect("192.168.1.60", 123456789, token, key)
+
+    // 方法 3: 自动发现
+    // device, err := ac.NewDeviceAuto(ctx, "192.168.1.60")
+
+    // 刷新状态
+    if err := device.Refresh(ctx); err != nil {
+        log.Fatal(err)
+    }
+
+    // 读取状态
+    if power := device.PowerState(); power != nil && *power {
+        fmt.Printf("温度: %.0f°C\n", device.TargetTemperature())
+    }
+
+    // 控制设备
+    device.SetTargetTemperature(26)
+    if err := device.Apply(ctx); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### 设备发现
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+// 发现局域网内的所有设备
+config := &msmart.DiscoverConfig{
+    Target:           "255.255.255.255",  // 广播地址
+    Timeout:          5 * time.Second,
+    DiscoveryPackets: 3,
+    AutoConnect:      true,  // 自动获取 V3 设备的 token
+}
+
+devices, err := msmart.Discover(ctx, config)
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, d := range devices {
+    fmt.Printf("设备: %s (%s), ID: %d\n", d.GetName(), d.GetIP(), d.GetID())
+}
+```
+
+### 架构说明
+
+库采用接口导向设计：
+
+- **`msmart.Device`** - 基础设备接口，定义所有设备的通用方法
+- **`ac.AC`** - 空调设备接口，扩展 Device + 空调特定方法
+- **工厂函数** - 返回接口，便于扩展和测试
+
+```go
+// 工厂函数返回接口（不是具体类型）
+var device ac.AC
+device, err := ac.NewDeviceFromConfig(cfg)
+```
+
 ## 🙏 致谢
 
 本项目是 [msmart-ng](https://github.com/mill1000/midea-msmart) Python 库的 Go 语言实现。

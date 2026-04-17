@@ -27,7 +27,7 @@ import (
 func TestEncodePacketRoundtrip(t *testing.T) {
 	// FRAME from Python test
 	frame := mustHexDecode("aa21ac8d000000000003418100ff03ff000200000000000000000000000003016971")
-	deviceID := int64(123456)
+	deviceID := msmart.LanDeviceId(123456)
 
 	// Encode the frame to a packet
 	packet, err := msmart.PacketEncode(deviceID, frame)
@@ -341,9 +341,9 @@ func TestReadConnectionLostException(t *testing.T) {
 func TestLAN_NewLAN(t *testing.T) {
 	ip := "192.168.1.57"
 	port := 6444
-	deviceID := int64(123456789)
+	deviceID := msmart.LanDeviceId(123456789)
 
-	lan := msmart.NewLAN(ip, port, deviceID)
+	lan := msmart.NewLAN(ip, port, deviceID, nil, time.Time{})
 
 	if lan == nil {
 		t.Fatal("Expected LAN to be non-nil")
@@ -366,7 +366,7 @@ func TestLAN_NewLAN(t *testing.T) {
 
 // TestLAN_SetMaxConnectionLifetime tests setting max connection lifetime.
 func TestLAN_SetMaxConnectionLifetime(t *testing.T) {
-	lan := msmart.NewLAN("192.168.1.57", 6444, 123456789)
+	lan := msmart.NewLAN("192.168.1.57", 6444, 123456789, nil, time.Time{})
 
 	// Set max connection lifetime
 	seconds := 300 // 5 minutes
@@ -389,7 +389,7 @@ func TestLAN_SetMaxConnectionLifetime(t *testing.T) {
 
 // TestLAN_TokenKey tests setting and getting token and key.
 func TestLAN_TokenKey(t *testing.T) {
-	lan := msmart.NewLAN("192.168.1.57", 6444, 123456789)
+	lan := msmart.NewLAN("192.168.1.57", 6444, 123456789, nil, time.Time{})
 
 	// Note: Token() and Key() return copies, not references to internal fields
 	// Setting token/key happens through Authenticate() in real usage
@@ -424,9 +424,9 @@ func TestLAN_RealDevice_Auth(t *testing.T) {
 	// Target device - only 192.168.1.57 is allowed
 	targetIP := "192.168.1.57"
 	port := 6444
-	deviceID := int64(0) // Replace with actual device ID
+	deviceID := msmart.LanDeviceId(0) // Replace with actual device ID
 
-	lan := msmart.NewLAN(targetIP, port, deviceID)
+	lan := msmart.NewLAN(targetIP, port, deviceID, nil, time.Time{})
 
 	// Token and key should be obtained from cloud API
 	// For testing, you would need to:
@@ -456,9 +456,9 @@ func TestLAN_RealDevice_Send(t *testing.T) {
 func TestLANClient_New(t *testing.T) {
 	ip := "192.168.1.57"
 	port := 6444
-	deviceID := uint64(123456789)
+	deviceID := msmart.LanDeviceId(123456789)
 
-	client := msmart.NewLANClient(ip, port, deviceID)
+	client := msmart.NewLANClient(ip, port, deviceID, nil, time.Time{})
 
 	if client == nil {
 		t.Fatal("Expected LANClient to be non-nil")
@@ -475,7 +475,7 @@ func TestLANClient_New(t *testing.T) {
 
 // TestLANClient_SetMaxConnectionLifetime tests setting max connection lifetime.
 func TestLANClient_SetMaxConnectionLifetime(t *testing.T) {
-	client := msmart.NewLANClient("192.168.1.57", 6444, 123456789)
+	client := msmart.NewLANClient("192.168.1.57", 6444, 123456789, nil, time.Time{})
 
 	// Set max connection lifetime
 	client.SetMaxConnectionLifetime(300)
@@ -485,7 +485,7 @@ func TestLANClient_SetMaxConnectionLifetime(t *testing.T) {
 
 // TestLANClient_SetTimeout tests setting timeout.
 func TestLANClient_SetTimeout(t *testing.T) {
-	client := msmart.NewLANClient("192.168.1.57", 6444, 123456789)
+	client := msmart.NewLANClient("192.168.1.57", 6444, 123456789, nil, time.Time{})
 
 	// Set timeout - should not panic
 	client.SetTimeout(5 * time.Second)

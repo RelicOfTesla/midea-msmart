@@ -25,9 +25,6 @@ import (
 	"time"
 )
 
-// DeviceType represents a device type
-type DeviceType int
-
 // DefaultCloudRegion is the default cloud region
 const DefaultCloudRegion = "US"
 
@@ -68,13 +65,13 @@ type BaseCloud struct {
 	CLOUD_CREDENTIALS map[string][2]string
 
 	// Internal fields
-	account         string
-	password        string
-	apiLock         sync.Mutex
-	baseURL         string
-	loginID         *string
-	session         map[string]interface{}
-	getAsyncClient  func() *http.Client
+	account        string
+	password       string
+	apiLock        sync.Mutex
+	baseURL        string
+	loginID        *string
+	session        map[string]interface{}
+	getAsyncClient func() *http.Client
 
 	// parseResponseFunc is the function to parse HTTP responses
 	// This allows subclasses to override the parsing behavior
@@ -91,11 +88,11 @@ func NewBaseCloud(baseURL string, region *string, account *string, password *str
 		APP_ID:            "",
 		CLIENT_TYPE:       1, // Android
 		FORMAT:            2, // JSON
-		LANGUAGE:         "en_US",
-		DEVICE_ID:        generateTokenHex(8), // Random device ID
-		RETRIES:          3,
+		LANGUAGE:          "en_US",
+		DEVICE_ID:         generateTokenHex(8), // Random device ID
+		RETRIES:           3,
 		CLOUD_CREDENTIALS: make(map[string][2]string),
-		getAsyncClient:   getAsyncClient,
+		getAsyncClient:    getAsyncClient,
 		parseResponseFunc: nil, // Will be set by subclasses
 		apiRequestFunc:    nil, // Will be set by subclasses
 	}
@@ -342,10 +339,10 @@ type SmartHomeCloud struct {
 
 // SmartHomeCloudSecurity is a class for SmartHome cloud specific security.
 type SmartHomeCloudSecurity struct {
-	HMAC_KEY    string
-	IOT_KEY     string
-	LOGIN_KEY   string
-	APP_KEY     string
+	HMAC_KEY  string
+	IOT_KEY   string
+	LOGIN_KEY string
+	APP_KEY   string
 
 	useChinaServer bool
 }
@@ -1134,7 +1131,7 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 	for i := len(data) - padding; i < len(data); i++ {
 		if data[i] != byte(padding) {
 			return nil, errors.New("invalid padding")
-	}
+		}
 	}
 
 	return data[:len(data)-padding], nil

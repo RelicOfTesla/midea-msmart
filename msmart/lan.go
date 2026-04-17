@@ -17,13 +17,9 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/RelicOfTesla/midea-msmart/msmart/device"
 )
-
-// Token represents authentication token
-type Token []byte
-
-// Key represents encryption key
-type Key []byte
 
 // Verbose controls whether debug logs are output
 var Verbose = false
@@ -362,10 +358,18 @@ type _LanProtocolV3 struct {
 var _ Protocol = (*_LanProtocolV3)(nil)
 
 // NewLanProtocolV3 creates a new LanProtocolV3 instance
-func NewLanProtocolV3() *_LanProtocolV3 {
+func NewLanProtocolV3(
+	localKey []byte,
+	localKeyExpiration time.Time,
+) *_LanProtocolV3 {
+	if localKeyExpiration.IsZero() || time.Now().UTC().After(localKeyExpiration) {
+		localKeyExpiration = time.Time{}
+	}
 	return &_LanProtocolV3{
-		_LanProtocol: NewLanProtocol(),
-		buffer:       make([]byte, 0),
+		_LanProtocol:       NewLanProtocol(),
+		buffer:             make([]byte, 0),
+		localKey:           localKey,
+		localKeyExpiration: localKeyExpiration,
 	}
 }
 
@@ -659,7 +663,7 @@ func (p *_LanProtocolV3) GetLocalKey(key []byte, data []byte) ([]byte, error) {
 }
 
 // Authenticate authenticates the connection with token and key
-func (p *_LanProtocolV3) Authenticate(token []byte, key []byte) error {
+func (p *_LanProtocolV3) Authenticate(_ context.Context, token []byte, key []byte) error {
 	// Raise an exception if trying to auth without any token or key
 	if len(token) == 0 || len(key) == 0 {
 		return &AuthenticationError{Message: "Token and key must be supplied."}
@@ -700,11 +704,13 @@ func (p *_LanProtocolV3) Authenticate(token []byte, key []byte) error {
 	return nil
 }
 
+type LanDeviceId uint64
+
 // LAN represents a LAN connection to a Midea device
 type LAN struct {
 	ip                    string
 	port                  int
-	deviceID              int64
+	deviceID              LanDeviceId
 	token                 []byte
 	key                   []byte
 	protocolVersion       int
@@ -716,19 +722,24 @@ type LAN struct {
 	conn                  net.Conn // Store connection for deadline management
 	readTimeout           time.Duration
 	disconnectOnTimeout   bool // Whether to disconnect on timeout (default: false)
+
+	localKey           []byte
+	localKeyExpiration time.Time
 }
 
 // Retries is the default number of retries
 const Retries = 3
 
 // NewLAN creates a new LAN instance
-func NewLAN(ip string, port int, deviceID int64) *LAN {
+func NewLAN(ip string, port int, deviceID LanDeviceId, localKey []byte, localKeyExpiration time.Time) *LAN {
 	return &LAN{
-		ip:              ip,
-		port:            port,
-		deviceID:        deviceID,
-		protocolVersion: 2,
-		readTimeout:     15 * time.Second, // Default read timeout
+		ip:                 ip,
+		port:               port,
+		deviceID:           deviceID,
+		protocolVersion:    2,
+		readTimeout:        15 * time.Second, // Default read timeout
+		localKey:           localKey,
+		localKeyExpiration: localKeyExpiration,
 	}
 }
 
@@ -755,31 +766,6 @@ func (l *LAN) GetLocalKey() ([]byte, time.Time) {
 		return nil, time.Time{}
 	}
 	return l.protocolV3.localKey, l.protocolV3.localKeyExpiration
-}
-
-// SetLocalKey sets the local key and expiration time directly
-// This allows reusing a cached local key without re-authenticating
-// Returns true if the key was set successfully, false if expired
-func (l *LAN) SetLocalKey(localKey []byte, expiration time.Time) bool {
-	if expiration.IsZero() || time.Now().UTC().After(expiration) {
-		return false
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Create V3 protocol if not exists
-	if l.protocolV3 == nil {
-		l.protocolVersion = 3
-		l.protocolV3 = NewLanProtocolV3()
-		l.protocol = l.protocolV3
-	}
-
-	// Set the local key and expiration
-	l.protocolV3.localKey = localKey
-	l.protocolV3.localKeyExpiration = expiration
-
-	return true
 }
 
 // MaxConnectionLifetime returns the maximum connection lifetime in seconds
@@ -841,7 +827,7 @@ func (l *LAN) connect() error {
 	l.conn = conn
 
 	if l.protocolVersion == 3 {
-		l.protocolV3 = NewLanProtocolV3()
+		l.protocolV3 = NewLanProtocolV3(l.localKey, l.localKeyExpiration)
 		l.protocol = l.protocolV3
 	} else {
 		l.protocol = NewLanProtocol()
@@ -897,7 +883,7 @@ func (l *LAN) disconnect() {
 }
 
 // Authenticate authenticates against a V3 device
-func (l *LAN) Authenticate(token Token, key Key, retries int) error {
+func (l *LAN) Authenticate(ctx context.Context, token device.Token, key device.Key, retries int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -928,7 +914,7 @@ func (l *LAN) Authenticate(token Token, key Key, retries int) error {
 
 	// Attempt to authenticate
 	for retries > 0 {
-		err := l.protocolV3.Authenticate(token, key)
+		err := l.protocolV3.Authenticate(ctx, token, key)
 		if err == nil {
 			break
 		}
@@ -962,6 +948,8 @@ func (l *LAN) Authenticate(token Token, key Key, retries int) error {
 	// Update stored token and key if successful
 	l.token = token
 	l.key = key
+	l.localKey = l.protocolV3.localKey
+	l.localKeyExpiration = l.protocolV3.localKeyExpiration
 
 	// Sleep briefly before requesting more data
 	time.Sleep(1 * time.Second)
@@ -1012,7 +1000,7 @@ func (l *LAN) readAvailable() ([][]byte, error) {
 }
 
 // Send sends data via the LAN protocol
-func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
+func (l *LAN) Send(ctx context.Context, data []byte, retries int) ([][]byte, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -1033,7 +1021,7 @@ func (l *LAN) Send(data []byte, retries int) ([][]byte, error) {
 	if l.protocolV3 != nil && !l.protocolV3.Authenticated() {
 		// Unlock during authentication to allow other operations
 		l.mu.Unlock()
-		err := l.Authenticate(nil, nil, Retries)
+		err := l.Authenticate(ctx, nil, nil, Retries)
 		l.mu.Lock()
 
 		if err != nil {
@@ -1257,7 +1245,7 @@ func PKCS7Unpad(data []byte) ([]byte, error) {
 type _Packet struct{}
 
 // PacketEncode encodes a command frame to a LAN packet
-func PacketEncode(deviceID int64, command []byte) ([]byte, error) {
+func PacketEncode(deviceID LanDeviceId, command []byte) ([]byte, error) {
 	// Encrypt command
 	encryptedPayload, err := SecurityEncryptAES(command)
 	if err != nil {
@@ -1350,9 +1338,9 @@ type LANClient struct {
 }
 
 // NewLANClient creates a new LANClient (for backward compatibility)
-func NewLANClient(ip string, port int, deviceID uint64) *LANClient {
+func NewLANClient(ip string, port int, deviceID LanDeviceId, localKey []byte, localKeyExpiration time.Time) *LANClient {
 	return &LANClient{
-		lan: NewLAN(ip, port, int64(deviceID)),
+		lan: NewLAN(ip, port, deviceID, localKey, localKeyExpiration),
 	}
 }
 
@@ -1368,13 +1356,13 @@ func (c *LANClient) Close() error {
 }
 
 // Authenticate authenticates with a V3 device
-func (c *LANClient) Authenticate(token, key []byte) error {
-	return c.lan.Authenticate(token, key, Retries)
+func (c *LANClient) Authenticate(ctx context.Context, token, key []byte) error {
+	return c.lan.Authenticate(ctx, token, key, Retries)
 }
 
 // Send sends data to the device
 func (c *LANClient) Send(ctx context.Context, data []byte) ([][]byte, error) {
-	return c.lan.Send(data, Retries)
+	return c.lan.Send(ctx, data, Retries)
 }
 
 // Token returns the current token

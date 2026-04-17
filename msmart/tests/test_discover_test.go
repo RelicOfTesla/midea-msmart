@@ -100,7 +100,7 @@ func TestDiscover_RealDevice(t *testing.T) {
 		t.Errorf("Expected IP %s, got %s", targetIP, device.GetIP())
 	}
 
-	t.Logf("Discovered device: IP=%s, ID=%d, Type=0x%02X, Name=%v",
+	t.Logf("Discovered device: IP=%s, ID=%s, Type=0x%02X, Name=%v",
 		device.GetIP(),
 		device.GetID(),
 		device.GetType(),
@@ -287,14 +287,14 @@ func TestDeviceInfo_NewDevice(t *testing.T) {
 	// Simulate discovered device info
 	ip := "10.100.1.140"
 	port := 6444
-	deviceID := 15393162840672
+	deviceID := "15393162840672"
 	deviceType := msmart.DeviceTypeAirConditioner
 	name := "net_ac_F7B4"
 	sn := "000000P0000000Q1F0C9D153F7B40000"
 	version := 2
 
 	// Create device with the discovered info
-	device := msmart.NewDevice(
+	device := msmart.NewBaseDevice(
 		ip,
 		port,
 		deviceID,
@@ -318,7 +318,7 @@ func TestDeviceInfo_NewDevice(t *testing.T) {
 	}
 
 	if device.GetID() != deviceID {
-		t.Errorf("Expected device ID %d, got %d", deviceID, device.GetID())
+		t.Errorf("Expected device ID %s, got %s", deviceID, device.GetID())
 	}
 
 	if device.GetType() != deviceType {
@@ -326,17 +326,17 @@ func TestDeviceInfo_NewDevice(t *testing.T) {
 	}
 
 	deviceName := device.GetName()
-	if deviceName == nil || *deviceName != name {
+	if deviceName != name {
 		t.Errorf("Expected name %s, got %v", name, deviceName)
 	}
 
 	deviceSN := device.GetSN()
-	if deviceSN == nil || *deviceSN != sn {
+	if deviceSN != sn {
 		t.Errorf("Expected SN %s, got %v", sn, deviceSN)
 	}
 
 	deviceVersion := device.GetVersion()
-	if deviceVersion == nil || *deviceVersion != version {
+	if deviceVersion != version {
 		t.Errorf("Expected version %d, got %v", version, deviceVersion)
 	}
 }
@@ -349,10 +349,10 @@ func TestDeviceInfo_NewDevice(t *testing.T) {
 // This is a translation of Python's test_discover_v2/test_discover_v3 device construction.
 func TestConstruct_AirConditioner(t *testing.T) {
 	// Test data from V2 response (Python test)
-	device := msmart.NewDevice(
+	device := msmart.NewBaseDevice(
 		"10.100.1.140",
 		6444,
-		15393162840672,
+		"15393162840672",
 		msmart.DeviceTypeAirConditioner,
 		msmart.WithName("net_ac_F7B4"),
 		msmart.WithSN("000000P0000000Q1F0C9D153F7B40000"),
@@ -371,7 +371,7 @@ func TestConstruct_AirConditioner(t *testing.T) {
 
 	// Verify version
 	deviceVersion := device.GetVersion()
-	if deviceVersion == nil || *deviceVersion != 2 {
+	if deviceVersion != 2 {
 		t.Errorf("Expected version 2, got %v", deviceVersion)
 	}
 }
@@ -379,10 +379,10 @@ func TestConstruct_AirConditioner(t *testing.T) {
 // TestConstruct_V3Device tests construction of V3 AirConditioner from discovery.
 func TestConstruct_V3Device(t *testing.T) {
 	// Test data from V3 response (Python test)
-	device := msmart.NewDevice(
+	device := msmart.NewBaseDevice(
 		"10.100.1.239",
 		6444,
-		147334558165565,
+		"147334558165565",
 		msmart.DeviceTypeAirConditioner,
 		msmart.WithName("net_ac_63BA"),
 		msmart.WithSN("000000P0000000Q1B88C29C963BA0000"),
@@ -401,7 +401,7 @@ func TestConstruct_V3Device(t *testing.T) {
 
 	// Verify version
 	deviceVersion := device.GetVersion()
-	if deviceVersion == nil || *deviceVersion != 3 {
+	if deviceVersion != 3 {
 		t.Errorf("Expected version 3, got %v", deviceVersion)
 	}
 }

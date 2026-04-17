@@ -169,10 +169,10 @@ func OperationalModeFromValue(value byte) OperationalMode {
 type SwingMode byte
 
 const (
-	SwingModeOff       SwingMode = 0x0
-	SwingModeVertical  SwingMode = 0x1
+	SwingModeOff        SwingMode = 0x0
+	SwingModeVertical   SwingMode = 0x1
 	SwingModeHorizontal SwingMode = 0x2
-	SwingModeBoth      SwingMode = 0x3
+	SwingModeBoth       SwingMode = 0x3
 
 	SwingModeDefault SwingMode = SwingModeOff
 )
@@ -227,7 +227,7 @@ func SwingModeFromValue(value byte) SwingMode {
 type SwingAngle byte
 
 const (
-	SwingAngleClose SwingAngle = 0x00  // TODO unverified
+	SwingAngleClose SwingAngle = 0x00 // TODO unverified
 	SwingAnglePos1  SwingAngle = 0x01
 	SwingAnglePos2  SwingAngle = 0x02
 	SwingAnglePos3  SwingAngle = 0x03
@@ -404,17 +404,17 @@ type Capability int64
 
 const (
 	// Presets
-	CapabilityECO    Capability = 1 << iota  // 1
-	CapabilitySilent                          // 2
-	CapabilitySleep                           // 4
+	CapabilityECO    Capability = 1 << iota // 1
+	CapabilitySilent                        // 2
+	CapabilitySleep                         // 4
 
 	// Swing
-	CapabilitySwingHorizontalAngle  // 8
-	CapabilitySwingVerticalAngle    // 16
+	CapabilitySwingHorizontalAngle // 8
+	CapabilitySwingVerticalAngle   // 16
 
 	// Misc
-	CapabilityHumidity  // 32
-	CapabilityPurifier  // 64
+	CapabilityHumidity // 32
+	CapabilityPurifier // 64
 )
 
 // Default capabilities
@@ -473,26 +473,26 @@ func (cm *CapabilityManager) SetFlags(flags Capability) {
 	cm.flags = flags
 }
 
-// Note: Device is now embedded from msmart.Device instead of being defined locally.
+// Note: DeviceBase is now embedded from msmart.DeviceBase instead of being defined locally.
 // This follows the correct inheritance pattern matching the Python implementation.
 
 // CommercialAirConditioner represents a commercial air conditioner device.
 // In Python: class CommercialAirConditioner(Device)
 type CommercialAirConditioner struct {
-	*msmart.Device
+	Device *msmart.DeviceBase
 
 	// Basic controls
-	powerState         bool
-	targetTemperature  float64
-	targetHumidity     byte
-	operationalMode    OperationalMode
-	fanSpeed           FanSpeed
+	powerState           bool
+	targetTemperature    float64
+	targetHumidity       byte
+	operationalMode      OperationalMode
+	fanSpeed             FanSpeed
 	horizontalSwingAngle SwingAngle
 	verticalSwingAngle   SwingAngle
 
-	eco     bool
-	silent  bool
-	sleep   bool
+	eco      bool
+	silent   bool
+	sleep    bool
 	purifier PurifierMode
 	auxMode  AuxHeatMode
 
@@ -520,22 +520,22 @@ type CommercialAirConditioner struct {
 
 // NewCommercialAirConditioner creates a new CommercialAirConditioner instance.
 // In Python: def __init__(self, ip: str, device_id: int, port: int, **kwargs)
-func NewCommercialAirConditioner(ip string, deviceID int, port int) *CommercialAirConditioner {
+func NewCommercialAirConditioner(ip string, deviceID string, port int) *CommercialAirConditioner {
 	ac := &CommercialAirConditioner{
-		Device: msmart.NewDevice(ip, port, deviceID, msmart.DeviceTypeCommercialAC),
+		Device: msmart.NewBaseDevice(ip, port, deviceID, msmart.DeviceTypeCommercialAC),
 
 		// Basic controls
-		powerState:         false,
-		targetTemperature:  17.0,
-		targetHumidity:     40,
-		operationalMode:    OperationalModeDefault,
-		fanSpeed:           FanSpeedDefault,
+		powerState:           false,
+		targetTemperature:    17.0,
+		targetHumidity:       40,
+		operationalMode:      OperationalModeDefault,
+		fanSpeed:             FanSpeedDefault,
 		horizontalSwingAngle: SwingAngleDefault,
 		verticalSwingAngle:   SwingAngleDefault,
 
-		eco:     false,
-		silent:  false,
-		sleep:   false,
+		eco:      false,
+		silent:   false,
+		sleep:    false,
 		purifier: PurifierModeDefault,
 		auxMode:  AuxHeatModeDefault,
 
@@ -556,7 +556,7 @@ func NewCommercialAirConditioner(ip string, deviceID int, port int) *CommercialA
 
 	// Set supported capability overrides
 	// This is the Go equivalent of Python's _SUPPORTED_CAPABILITY_OVERRIDES
-	ac.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
+	ac.Device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
 		"min_target_temperature":   {AttrName: "minTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
 		"max_target_temperature":   {AttrName: "maxTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
 		"supported_modes":          {AttrName: "supportedOpModes", ValueType: reflect.TypeOf(OperationalMode(0))},
@@ -575,7 +575,7 @@ func NewCommercialAirConditioner(ip string, deviceID int, port int) *CommercialA
 func (ac *CommercialAirConditioner) updateState(res interface{}) {
 	switch r := res.(type) {
 	case *QueryResponse:
-		logger.Debug("Query response payload from device", "id", ac.GetID(), "response", r)
+		logger.Debug("Query response payload from device", "id", ac.Device.GetID(), "response", r)
 
 		ac.powerState = r.PowerOn
 		ac.targetTemperature = r.TargetTemperature
@@ -603,7 +603,7 @@ func (ac *CommercialAirConditioner) updateState(res interface{}) {
 		ac.auxMode = AuxHeatModeFromValue(r.AuxMode)
 
 	default:
-		logger.Debug("Ignored unknown response from device", "id", ac.GetID(), "response", res)
+		logger.Debug("Ignored unknown response from device", "id", ac.Device.GetID(), "response", res)
 	}
 }
 
@@ -701,7 +701,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 		}
 
 		// Send command using the device's LAN connection
-		resp, err := ac.Device.SendBytes(data)
+		resp, err := ac.Device.SendBytes(ctx, data)
 		if err != nil {
 			logger.Error("Failed to send command", "error", err)
 			continue
@@ -725,7 +725,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 	}
 
 	// Device is supported if we can process any response
-	if ac.GetOnline() && len(validResponses) > 0 {
+	if ac.Device.GetOnline() && len(validResponses) > 0 {
 		ac.Device.SetSupported(true)
 	}
 
@@ -743,19 +743,19 @@ func (ac *CommercialAirConditioner) GetCapabilities(ctx context.Context) error {
 	}
 
 	if len(responses) == 0 {
-		logger.Error("Failed to query capabilities from device", "id", ac.GetID())
-		return fmt.Errorf("failed to query capabilities from device %d", ac.GetID())
+		logger.Error("Failed to query capabilities from device", "id", ac.Device.GetID())
+		return fmt.Errorf("failed to query capabilities from device %s", ac.Device.GetID())
 	}
 
 	response, ok := responses[0].(*QueryResponse)
 	if !ok {
-		logger.Error("Unexpected response from device", "id", ac.GetID())
-		return fmt.Errorf("unexpected response from device %d", ac.GetID())
+		logger.Error("Unexpected response from device", "id", ac.Device.GetID())
+		return fmt.Errorf("unexpected response from device %s", ac.Device.GetID())
 	}
 
 	// Get capabilities from query response
 	logger.Debug("Parsing capabilities from query response payload from device",
-		"id", ac.GetID(), "response", response)
+		"id", ac.Device.GetID(), "response", response)
 	response.ParseCapabilities()
 
 	// Update device capabilities
@@ -796,46 +796,46 @@ func (ac *CommercialAirConditioner) Apply(ctx context.Context) error {
 	if _, ok := ac.updatedControls[ControlIdMode]; ok {
 		if !msmart.Contains(ac.supportedOpModes, ac.operationalMode) {
 			logger.Warn("Device is not capable of operational mode",
-				"id", ac.GetID(), "mode", ac.operationalMode)
+				"id", ac.Device.GetID(), "mode", ac.operationalMode)
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdFanSpeed]; ok {
 		if !msmart.Contains(ac.supportedFanSpeeds, ac.fanSpeed) {
 			logger.Warn("Device is not capable of fan speed",
-				"id", ac.GetID(), "speed", ac.fanSpeed)
+				"id", ac.Device.GetID(), "speed", ac.fanSpeed)
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdEco]; ok {
 		if ac.eco && !ac.capabilities.Has(CapabilityECO) {
-			logger.Warn("Device is not capable of eco preset", "id", ac.GetID())
+			logger.Warn("Device is not capable of eco preset", "id", ac.Device.GetID())
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdSilent]; ok {
 		if ac.silent && !ac.capabilities.Has(CapabilitySilent) {
-			logger.Warn("Device is not capable of silent preset", "id", ac.GetID())
+			logger.Warn("Device is not capable of silent preset", "id", ac.Device.GetID())
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdSleep]; ok {
 		if ac.sleep && !ac.capabilities.Has(CapabilitySleep) {
-			logger.Warn("Device is not capable of sleep preset", "id", ac.GetID())
+			logger.Warn("Device is not capable of sleep preset", "id", ac.Device.GetID())
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdPurifier]; ok {
 		if ac.purifier != PurifierModeOff && !msmart.Contains(ac.supportedPurifierModes, ac.purifier) {
 			logger.Warn("Device is not capable of purifier mode",
-				"id", ac.GetID(), "mode", ac.purifier)
+				"id", ac.Device.GetID(), "mode", ac.purifier)
 		}
 	}
 
 	if _, ok := ac.updatedControls[ControlIdAuxMode]; ok {
 		if ac.auxMode != AuxHeatModeOff && !msmart.Contains(ac.supportedAuxModes, ac.auxMode) {
 			logger.Warn("Device is not capable of aux mode",
-				"id", ac.GetID(), "mode", ac.auxMode)
+				"id", ac.Device.GetID(), "mode", ac.auxMode)
 		}
 	}
 
@@ -884,7 +884,7 @@ func (ac *CommercialAirConditioner) Apply(ctx context.Context) error {
 				}
 			}
 			logger.Warn("Device powering off. Dropped additional control updates",
-				"id", ac.GetID(), "dropped", dropped)
+				"id", ac.Device.GetID(), "dropped", dropped)
 		}
 		commands = []interface{}{NewControlCommand(map[ControlId]interface{}{ControlIdPower: false})}
 	} else {
@@ -1291,4 +1291,3 @@ func (ac *CommercialAirConditioner) CapabilitiesDict() map[string]interface{} {
 		"additional_capabilities":  caps,
 	}
 }
-

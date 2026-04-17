@@ -124,8 +124,8 @@ func TestGetDeviceInfo_V2(t *testing.T) {
 	}
 
 	// Python: self.assertEqual(info["device_id"], 15393162840672)
-	if info.DeviceID != 15393162840672 {
-		t.Errorf("Expected device ID 15393162840672, got %d", info.DeviceID)
+	if info.DeviceID != "15393162840672" {
+		t.Errorf("Expected device ID 15393162840672, got %s", info.DeviceID)
 	}
 
 	// Python: self.assertEqual(info["device_type"], DeviceType.AIR_CONDITIONER)
@@ -170,8 +170,8 @@ func TestGetDeviceInfo_V3(t *testing.T) {
 	}
 
 	// Python: self.assertEqual(info["device_id"], 147334558165565)
-	if info.DeviceID != 147334558165565 {
-		t.Errorf("Expected device ID 147334558165565, got %d", info.DeviceID)
+	if info.DeviceID != "147334558165565" {
+		t.Errorf("Expected device ID 147334558165565, got %s", info.DeviceID)
 	}
 
 	// Python: self.assertEqual(info["device_type"], DeviceType.AIR_CONDITIONER)
@@ -234,7 +234,7 @@ func TestDeviceConstruction_V2(t *testing.T) {
 	}
 
 	// Python: device = Device.construct(type=info["device_type"], **info)
-	device := NewDevice(
+	device := NewBaseDevice(
 		info.IP,
 		info.Port,
 		info.DeviceID,
@@ -256,8 +256,8 @@ func TestDeviceConstruction_V2(t *testing.T) {
 
 	// Python: self.assertEqual(device.version, 2)
 	deviceVersion := device.GetVersion()
-	if deviceVersion == nil || *deviceVersion != 2 {
-		t.Errorf("Expected version 2, got %v", deviceVersion)
+	if deviceVersion != 2 {
+		t.Errorf("Expected version 2, got %d", deviceVersion)
 	}
 }
 
@@ -273,7 +273,7 @@ func TestDeviceConstruction_V3(t *testing.T) {
 	}
 
 	// Python: device = Device.construct(type=info["device_type"], **info)
-	device := NewDevice(
+	device := NewBaseDevice(
 		info.IP,
 		info.Port,
 		info.DeviceID,
@@ -295,7 +295,7 @@ func TestDeviceConstruction_V3(t *testing.T) {
 
 	// Python: self.assertEqual(device.version, 3)
 	deviceVersion := device.GetVersion()
-	if deviceVersion == nil || *deviceVersion != 3 {
-		t.Errorf("Expected version 3, got %v", deviceVersion)
+	if deviceVersion != 3 {
+		t.Errorf("Expected version 3, got %d", deviceVersion)
 	}
 }

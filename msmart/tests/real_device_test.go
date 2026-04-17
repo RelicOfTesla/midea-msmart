@@ -18,10 +18,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
+	devicetypes "github.com/RelicOfTesla/midea-msmart/msmart/device"
 )
 
 // ============================================================================
@@ -90,17 +92,17 @@ func TestRealDevice_Discovery(t *testing.T) {
 	t.Logf("✅ Device discovered successfully:")
 	t.Logf("   IP: %s", device.GetIP())
 	t.Logf("   Port: %d", device.GetPort())
-	t.Logf("   Device ID: %d", device.GetID())
+	t.Logf("   Device ID: %s", device.GetID())
 	t.Logf("   Type: 0x%02X", device.GetType())
 
-	if name := device.GetName(); name != nil {
-		t.Logf("   Name: %s", *name)
+	if name := device.GetName(); name != "" {
+		t.Logf("   Name: %s", name)
 	}
-	if sn := device.GetSN(); sn != nil {
-		t.Logf("   SN: %s", *sn)
+	if sn := device.GetSN(); sn != "" {
+		t.Logf("   SN: %s", sn)
 	}
-	if version := device.GetVersion(); version != nil {
-		t.Logf("   Version: %d", *version)
+	if version := device.GetVersion(); version != 0 {
+		t.Logf("   Version: %d", version)
 	}
 }
 
@@ -124,7 +126,7 @@ func TestRealDevice_DiscoveryBroadcast(t *testing.T) {
 	// Check if we found our target device
 	found := false
 	for _, device := range devices {
-		t.Logf("Found device: %s (ID: %d, Type: 0x%02X)",
+		t.Logf("Found device: %s (ID: %s, Type: 0x%02X)",
 			device.GetIP(), device.GetID(), device.GetType())
 		if device.GetIP() == TargetDeviceIP {
 			found = true
@@ -176,8 +178,8 @@ func TestRealDevice_Properties(t *testing.T) {
 	}
 
 	deviceID := device.GetID()
-	if deviceID == 0 {
-		t.Error("GetID() returned 0")
+	if deviceID == "" {
+		t.Error("GetID() returned empty string")
 	}
 
 	deviceType := device.GetType()
@@ -193,16 +195,16 @@ func TestRealDevice_Properties(t *testing.T) {
 	t.Logf("Device properties:")
 	t.Logf("  IP: %s", ip)
 	t.Logf("  Port: %d", port)
-	t.Logf("  ID: %d", deviceID)
+	t.Logf("  ID: %s", deviceID)
 	t.Logf("  Type: 0x%02X", deviceType)
-	if sn != nil {
-		t.Logf("  SN: %s", *sn)
+	if sn != "" {
+		t.Logf("  SN: %s", sn)
 	}
-	if version != nil {
-		t.Logf("  Version: %d", *version)
+	if version != 0 {
+		t.Logf("  Version: %d", version)
 	}
-	if name != nil {
-		t.Logf("  Name: %s", *name)
+	if name != "" {
+		t.Logf("  Name: %s", name)
 	}
 
 	// Test ToDict
@@ -276,17 +278,17 @@ func TestRealDevice_Version(t *testing.T) {
 	}
 
 	version := device.GetVersion()
-	if version == nil {
-		t.Fatal("Device version is nil")
+	if version == 0 {
+		t.Fatal("Device version is 0 (unknown)")
 	}
 
-	switch *version {
+	switch version {
 	case 2:
 		t.Log("✅ Device is V2 (no authentication required)")
 	case 3:
 		t.Log("✅ Device is V3 (authentication required for commands)")
 	default:
-		t.Logf("⚠️ Device has unknown version %d", *version)
+		t.Logf("⚠️ Device has unknown version %d", version)
 	}
 }
 
@@ -316,7 +318,12 @@ func TestRealDevice_LAN(t *testing.T) {
 	}
 
 	// Create LAN client
-	lan := msmart.NewLAN(TargetDeviceIP, TargetDevicePort, int64(device.GetID()))
+	deviceID := device.GetID()
+	deviceIDInt, err := strconv.ParseInt(deviceID, 10, 64)
+	if err != nil {
+		t.Fatalf("Invalid device ID: %s", deviceID)
+	}
+	lan := msmart.NewLAN(TargetDeviceIP, TargetDevicePort, msmart.LanDeviceId(deviceIDInt), nil, time.Time{})
 	if lan == nil {
 		t.Fatal("NewLAN returned nil")
 	}
@@ -350,7 +357,12 @@ func TestRealDevice_LANClient(t *testing.T) {
 	}
 
 	// Create LANClient
-	client := msmart.NewLANClient(TargetDeviceIP, TargetDevicePort, uint64(device.GetID()))
+	deviceID := device.GetID()
+	deviceIDInt, err := strconv.ParseInt(deviceID, 10, 64)
+	if err != nil {
+		t.Fatalf("Invalid device ID: %s", deviceID)
+	}
+	client := msmart.NewLANClient(TargetDeviceIP, TargetDevicePort, msmart.LanDeviceId(deviceIDInt), nil, time.Time{})
 	if client == nil {
 		t.Fatal("NewLANClient returned nil")
 	}
@@ -408,12 +420,12 @@ func TestRealDevice_Authentication(t *testing.T) {
 		}
 
 		sn := device.GetSN()
-		if sn == nil {
-			t.Fatal("Device SN is nil")
+		if sn == "" {
+			t.Fatal("Device SN is empty")
 		}
 
 		// Get UDPID from SN
-		udpid := msmart.SecurityUdpid([]byte(*sn))
+		udpid := msmart.SecurityUdpid([]byte(sn))
 
 		// Get token/key
 		token, key, err = cloud.GetToken(fmt.Sprintf("%x", udpid))
@@ -440,10 +452,15 @@ func TestRealDevice_Authentication(t *testing.T) {
 	}
 
 	// Create LAN client
-	lan := msmart.NewLAN(TargetDeviceIP, TargetDevicePort, int64(device.GetID()))
+	deviceID := device.GetID()
+	deviceIDInt, err := strconv.ParseInt(deviceID, 10, 64)
+	if err != nil {
+		t.Fatalf("Invalid device ID: %s", deviceID)
+	}
+	lan := msmart.NewLAN(TargetDeviceIP, TargetDevicePort, msmart.LanDeviceId(deviceIDInt), nil, time.Time{})
 
 	// Authenticate
-	err = lan.Authenticate([]byte(token), []byte(key), 3)
+	err = lan.Authenticate(context.Background(), devicetypes.Token(token), devicetypes.Key(key), 3)
 	if err != nil {
 		t.Fatalf("Authentication failed: %v", err)
 	}
@@ -532,15 +549,15 @@ func TestRealDevice_CloudGetToken(t *testing.T) {
 	}
 
 	sn := device.GetSN()
-	if sn == nil {
-		t.Fatal("Device SN is nil")
+	if sn == "" {
+		t.Fatal("Device SN is empty")
 	}
 
 	// Get UDPID from SN
-	udpid := msmart.SecurityUdpid([]byte(*sn))
+	udpid := msmart.SecurityUdpid([]byte(sn))
 	udpidHex := fmt.Sprintf("%x", udpid)
 
-	t.Logf("Device SN: %s", *sn)
+	t.Logf("Device SN: %s", sn)
 	t.Logf("UDPID: %s", udpidHex)
 
 	// Login to cloud
