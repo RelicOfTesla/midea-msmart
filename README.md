@@ -98,242 +98,40 @@ midea fan 客厅 high
 midea swing 客厅 vertical
 ```
 
-## 📖 命令详解
+## 📖 命令参考
+
+### 常用命令
+
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `discover` | 发现设备 | `midea discover` |
+| `list` | 列出设备 | `midea list` |
+| `bind` | 绑定设备 | `midea bind 192.168.1.60 -n 客厅` |
+| `status` | 查询状态 | `midea status 客厅` |
+| `on/off` | 开关机 | `midea on 客厅` |
+| `temp` | 设置温度 | `midea temp 客厅 26` |
+| `mode` | 设置模式 | `midea mode 客厅 cool` |
+| `fan` | 设置风速 | `midea fan 客厅 high` |
+| `swing` | 设置摆风 | `midea swing 客厅 vertical` |
+| `set` | 多参数设置 | `midea set 客厅 --temp 26 --mode cool` |
+| `query` | 查询属性 | `midea query 客厅 temp` |
+
+### 参数说明
+
+**模式**: `cool`(制冷), `heat`(制热), `auto`(自动), `dry`(除湿), `fan`(送风)
+
+**风速**: `auto`(自动), `low`(低速), `medium`(中速), `high`(高速), `silent`(静音)
+
+**摆风**: `off`(关闭), `vertical`(上下), `horizontal`(左右), `both`(全方位)
+
+**温度范围**: 16-30°C
 
 ### 全局选项
 
-```
--v, --verbose           显示详细调试日志
---region <地区>         云端服务地区 (DE, KR, US), 默认: US
---device_type <类型>    设备类型: AC (空调), CC (商业空调), 默认: AC
-```
-
-### 设备管理命令
-
-#### discover - 发现设备
-
 ```bash
-midea discover [<host>] [--auto-connect|-a] [--count <数量>] [--account <账号> --password <密码>]
-```
-
-- `<host>`: 可选，指定目标设备 IP（发现单个设备）
-- `--auto-connect`: 自动连接并获取 V3 设备的 token
-- `--count`: 广播包数量（默认: 3）
-- `--account/--password`: 美的账号密码（V3 设备认证需要）
-
-#### list - 列出设备
-
-```bash
-midea list
-```
-
-列出已保存的所有设备。
-
-#### bind - 绑定设备
-
-```bash
-midea bind <id|sn|ip> -n <名称>
-```
-
-为设备绑定一个别名，方便后续使用。
-
-#### unbind - 解绑设备
-
-```bash
-midea unbind <name|id>
-```
-
-解绑指定的设备。
-
-### 状态查询命令
-
-#### status - 查询设备状态
-
-```bash
-midea status <name|id> [--auto] [--json|-j] [--capabilities [FILE]] [--energy]
-```
-
-- `--auto`: 自动发现设备并获取 token
-- `--json`, `-j`: 以 JSON 格式输出状态（便于脚本处理）
-- `--capabilities`: 显示设备能力信息
-- `--capabilities FILE`: 将设备能力写入 YAML 文件
-- `--energy`: 显示能耗信息
-
-### 控制命令
-
-#### on - 开机
-
-```bash
-midea on <name|id>
-```
-
-#### off - 关机
-
-```bash
-midea off <name|id>
-```
-
-#### temp - 设置温度
-
-```bash
-midea temp <name|id> <温度>
-```
-
-温度范围: 16-30°C
-
-#### mode - 设置运行模式
-
-```bash
-midea mode <name|id> <模式>
-```
-
-模式选项:
-- `cool` - 制冷
-- `heat` - 制热
-- `auto` - 自动
-- `dry` - 除湿
-- `fan` - 送风
-
-#### fan - 设置风速
-
-```bash
-midea fan <name|id> <风速>
-```
-
-风速选项:
-- `auto` - 自动
-- `low` - 低速
-- `medium` - 中速
-- `high` - 高速
-- `silent` - 静音
-
-#### swing - 设置摆风模式
-
-```bash
-midea swing <name|id> <模式>
-```
-
-摆风模式:
-- `off` - 关闭
-- `vertical` - 上下摆风
-- `horizontal` - 左右摆风
-- `both` - 全方位摆风
-
-#### set - 多参数设置
-
-```bash
-midea set <name|id> [选项]
-```
-
-选项:
-- `--temp <温度>` - 设置温度
-- `--mode <模式>` - 设置运行模式
-- `--fan <风速>` - 设置风速
-- `--swing <模式>` - 设置摆风
-- `--power <on|off>` - 设置电源
-
-示例:
-```bash
-# 一次设置多个属性
-midea set 客厅 --temp 26 --mode cool --fan high
-
-# 开机并设置温度
-midea set 客厅 --power on --temp 24
-```
-
-#### query - 查询设备属性
-
-```bash
-midea query <name|id> [key] [--all] [--auto]
-```
-
-- `key`: 属性名称（如: temp, mode, fan, swing, power）
-- `--auto`: 自动发现设备并获取 token
-
-### 高级命令
-
-```
-midea - 美的空调控制 CLI v1.0.0
-
-用法:
-  midea [-v|--verbose] [--region <地区>] [--device_type <类型>] <command> [arguments]
-
-全局选项:
-  -v, --verbose        显示详细调试日志
-  --region <地区>      云端服务地区 (DE, KR, US), 默认: US
-  --device_type <类型> 设备类型: AC (空调), CC (商业空调), 默认: AC
-
-命令:
-  discover [<host>] [--auto-connect|-a] [--count <数量>] [--account <账号> --password <密码>]
-                                发现设备并保存到配置
-                                <host>: 可选,指定目标设备IP (发现单个设备)
-                                --auto-connect: 自动连接并获取V3设备的token
-                                --count: 广播包数量 (默认: 3)
-                                --account/--password: 美的账号密码 (V3设备认证需要)
-  list                          列出已保存的设备
-  bind <id|sn|ip> -n <名称>   绑定设备别名
-  unbind <name|id>            解绑设备
-
-  status <name|id> [--auto] [--capabilities [FILE]] [--energy]
-                                查询设备状态
-                                --auto: 自动发现设备并获取token
-                                --capabilities: 显示设备能力信息
-                                --capabilities FILE: 将设备能力写入YAML文件
-                                --energy: 显示能耗信息
-  on <name|id>                开机
-  off <name|id>               关机
-  temp <name|id> <温度>       设置温度 (范围: 16-30°C)
-  mode <name|id> <模式>       设置运行模式
-  fan <name|id> <风速>        设置风速
-  swing <name|id> <模式>      设置摆风模式
-  set <name|id> [选项]        多参数设置 (一次设置多个属性)
-  query <name|id> [key] [--all] [--auto]
-                                查询设备属性
-                                key: 属性名称 (如: temp, mode, fan, swing, power)
-                                --all: 显示所有属性 (默认)
-                                --auto: 自动发现设备并获取token
-  download <host> [--account <账号> --password <密码>]
-                                下载设备的 Lua 协议和插件
-                                --account/--password: 美的账号密码 (下载需要)
-
-参数范围:
-  温度: 16, 17, 18, ..., 29, 30 (°C)
-  模式: cool(制冷), heat(制热), auto(自动), dry(除湿), fan(送风)
-  风速: auto(自动), low(低), medium(中), high(高), silent(静音)
-  摆风: off(关闭), vertical(上下), horizontal(左右), both(全方位)
-
-set命令选项:
-  --temp <温度>      设置温度
-  --mode <模式>      设置运行模式
-  --fan <风速>       设置风速
-  --swing <模式>     设置摆风
-  --power <on|off>   设置电源
-
-示例:
-  midea discover                      # 发现局域网内的所有设备
-  midea discover 192.168.1.60         # 发现指定IP的设备
-  midea -v discover --auto-connect   # 使用verbose模式发现设备并自动获取V3设备token
-  midea discover --auto-connect --account your@email.com --password yourpass
-                                      # 使用自定义账号发现设备
-  midea list                          # 列出已保存的设备
-  midea bind 192.168.1.60 -n 客厅    # 绑定IP为192.168.1.60的设备,命名为"客厅"
-  midea status 客厅                   # 查询"客厅"空调状态
-  midea status 客厅 --json           # 以 JSON 格式输出状态（便于脚本处理）
-  midea status 客厅 --capabilities    # 查询"客厅"空调状态并显示设备能力
-  midea status 客厅 --capabilities caps.yaml  # 将设备能力写入 caps.yaml 文件
-  midea status 客厅 --energy          # 查询"客厅"空调状态并显示能耗信息
-  midea on 客厅                       # 打开"客厅"空调
-  midea temp 客厅 26                  # 设置温度为26°C
-  midea mode 客厅 cool                # 设置为制冷模式
-  midea fan 客厅 high                 # 设置为高风速
-  midea swing 客厅 vertical           # 设置为上下摆风
-
-  # 多参数设置 (一次命令设置多个属性)
-  midea set 客厅 --temp 26 --mode cool --fan high
-  midea set 客厅 --power on --temp 24
-
-  # 下载设备协议和插件
-  midea download 192.168.1.60 --account your@email.com --password yourpass
+-v, --verbose           # 显示详细日志
+--region <地区>         # 云端服务地区 (DE, KR, US), 默认: US
+--device_type <类型>    # 设备类型: AC (空调), CC (商业空调), 默认: AC
 ```
 
 ## ⚙️ 配置
@@ -342,85 +140,12 @@ set命令选项:
 - 当前目录的 `midea.json`（优先）
 - `~/.config/midea/config.json`（默认）
 
-配置文件格式：
-
-```json
-{
-  "devices": {
-    "客厅": {
-      "id": "192.168.1.60",
-      "name": "客厅空调",
-      "type": "AC",
-      "token": "xxx",
-      "key": "yyy",
-      "local_key": "01a74aca...",
-      "local_key_expire": "2026-04-17T01:34:12Z"
-    },
-    "卧室": {
-      "id": "192.168.1.61",
-      "name": "卧室空调",
-      "type": "AC",
-      "token": "xxx",
-      "key": "yyy"
-    }
-  }
-}
-```
-
-### LocalKey 存储与复用
-
-对于 V3 设备，CLI 会自动缓存 `local_key` 和过期时间：
-
-- **存储**：在认证成功后，自动保存 `local_key` 和过期时间到配置文件
-- **复用**：下次连接时，如果 `local_key` 有效且未过期，直接使用缓存的 key，避免重复认证
-- **过期处理**：如果 `local_key` 已过期，会自动重新认证并更新缓存
-
-这样可以显著减少 V3 设备的连接时间。
-
-## 🛠️ 开发
-
-
-### 从源码运行
+## 📝 自动化示例
 
 ```bash
-# 直接运行
-go run ./cmd [命令]
-
-# 编译
-go build -o midea ./cmd
-```
-
-### 测试
-
-```bash
-# 运行测试
-go test ./...
-
-# 运行特定测试
-go test ./msmart/... -v
-```
-
-## 📝 示例
-
-### 自动化脚本
-
-```bash
-#!/bin/bash
-# 每天早上 7 点自动打开客厅空调，设置为制冷模式，温度 24°C
-
-midea on 客厅
-midea mode 客厅 cool
-midea temp 客厅 24
-```
-
-### 配合 cron 定时任务
-
-```cron
-# 每天 7:00 开启客厅空调
-0 7 * * * /usr/local/bin/midea on 客厅
-
-# 每天 23:00 关闭客厅空调
-0 23 * * * /usr/local/bin/midea off 客厅
+# cron 定时任务
+0 7 * * * /usr/local/bin/midea on 客厅    # 每天 7:00 开启
+0 23 * * * /usr/local/bin/midea off 客厅  # 每天 23:00 关闭
 ```
 
 
@@ -446,15 +171,12 @@ midea temp 客厅 24
 
 ## 📚 作为库使用
 
-msmart 可以作为 Go 库集成到你的项目中。
-
-### 基本用法
-
 ```go
 package main
 
 import (
     "context"
+    "encoding/hex"
     "fmt"
     "log"
     "time"
@@ -467,81 +189,30 @@ func main() {
     ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
     defer cancel()
 
-    // 方法 1: 从配置创建设备
-    cfg := &ac.DeviceConfig{
-        IP:      "192.168.1.60",
-        Port:    6444,
-        ID:      "123456789",
-        Name:    "客厅",
-        Version: 3,
-        Token:   "your_token_hex",
-        Key:     "your_key_hex",
-    }
-    device, err := ac.NewDeviceFromConfig(cfg)
-    if err != nil {
-        log.Fatal(err)
-    }
+    token, _ := hex.DecodeString("your_token_hex")
+    key, _ := hex.DecodeString("your_key_hex")
 
-    // 方法 2: 直接连接
-    // device, err := ac.NewDeviceDirect("192.168.1.60", 123456789, token, key)
+    device := ac.NewAirConditioner(
+        "192.168.1.60",
+        6444,
+        "123456789",
+        msmart.WithVersion(3),
+        msmart.WithTokenKey(token, key),
+    )
 
-    // 方法 3: 自动发现
-    // device, err := ac.NewDeviceAuto(ctx, "192.168.1.60")
-
-    // 刷新状态
     if err := device.Refresh(ctx); err != nil {
         log.Fatal(err)
     }
 
-    // 读取状态
-    if power := device.PowerState(); power != nil && *power {
-        fmt.Printf("温度: %.0f°C\n", device.TargetTemperature())
+    if device.PowerState() {
+        fmt.Printf("温度: %.1f°C\n", device.TargetTemperature())
     }
 
-    // 控制设备
     device.SetTargetTemperature(26)
     if err := device.Apply(ctx); err != nil {
         log.Fatal(err)
     }
 }
-```
-
-### 设备发现
-
-```go
-ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-defer cancel()
-
-// 发现局域网内的所有设备
-config := &msmart.DiscoverConfig{
-    Target:           "255.255.255.255",  // 广播地址
-    Timeout:          5 * time.Second,
-    DiscoveryPackets: 3,
-    AutoConnect:      true,  // 自动获取 V3 设备的 token
-}
-
-devices, err := msmart.Discover(ctx, config)
-if err != nil {
-    log.Fatal(err)
-}
-
-for _, d := range devices {
-    fmt.Printf("设备: %s (%s), ID: %d\n", d.GetName(), d.GetIP(), d.GetID())
-}
-```
-
-### 架构说明
-
-库采用接口导向设计：
-
-- **`msmart.Device`** - 基础设备接口，定义所有设备的通用方法
-- **`ac.AC`** - 空调设备接口，扩展 Device + 空调特定方法
-- **工厂函数** - 返回接口，便于扩展和测试
-
-```go
-// 工厂函数返回接口（不是具体类型）
-var device ac.AC
-device, err := ac.NewDeviceFromConfig(cfg)
 ```
 
 ## 🙏 致谢
