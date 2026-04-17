@@ -128,7 +128,7 @@ const (
 	StateIdFahrenheitUnit
 	StateIdFollowMe
 	StateIdPurifier
-	StateIdAuxMode  // Derived from AuxHeat/IndependentAuxHeat
+	StateIdAuxMode // Derived from AuxHeat/IndependentAuxHeat
 	StateIdPowerOn
 
 	// ReadOnly fields (only in StateResponse, cannot be written)
@@ -623,8 +623,20 @@ func convertToBool(value any, fieldName string) (bool, error) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		// Non-zero values are true
 		return reflect.ValueOf(value).Int() != 0, nil
+	case nil:
+		return false, nil
 	default:
-		return false, fmt.Errorf("%s: cannot convert %T to bool", fieldName, value)
+		rv := reflect.ValueOf(value)
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return rv.Int() != 0, nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return rv.Uint() != 0, nil
+		case reflect.Float32, reflect.Float64:
+			return rv.Float() != 0, nil
+		default:
+			return false, fmt.Errorf("%s: cannot convert %T to bool", fieldName, value)
+		}
 	}
 }
 
@@ -655,8 +667,20 @@ func convertToFloat64(value any, fieldName string) (float64, error) {
 		return float64(v), nil
 	case uint64:
 		return float64(v), nil
+	case nil:
+		return 0, nil
 	default:
-		return 0, fmt.Errorf("%s: cannot convert %T to float64", fieldName, value)
+		rv := reflect.ValueOf(value)
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return float64(rv.Int()), nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return float64(rv.Uint()), nil
+		case reflect.Float32, reflect.Float64:
+			return rv.Float(), nil
+		default:
+			return 0, fmt.Errorf("%s: cannot convert %T to float64", fieldName, value)
+		}
 	}
 }
 
