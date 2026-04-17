@@ -14,8 +14,8 @@ type XCDevice interface {
 
 	// State queries
 	TargetTemperature() float64
-	IndoorTemperature() float64
-	OutdoorTemperature() float64
+	IndoorTemperature() *float64
+	OutdoorTemperature() *float64
 	OperationalMode() OperationalMode
 	FanSpeed() FanSpeed
 	SwingMode() SwingMode

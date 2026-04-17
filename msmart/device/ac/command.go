@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"reflect"
 
 	msmart "github.com/RelicOfTesla/midea-msmart/msmart"
 )
@@ -105,6 +106,65 @@ const (
 	PropertyIdIECO           PropertyId = 0x00E3
 	PropertyIdAnion          PropertyId = 0x021E
 )
+
+// StateId represents state field enum
+type StateId uint16
+
+const (
+	// WriteOnly fields (only in SetStateCommand, cannot be read)
+	StateIdBeepOn StateId = iota + 1
+	StateIdForceAuxHeat
+
+	// ReadWrite fields (in both SetStateCommand and StateResponse)
+	StateIdTargetTemperature
+	StateIdTargetHumidity
+	StateIdOperationalMode
+	StateIdFanSpeed
+	StateIdSwingMode
+	StateIdEco
+	StateIdTurbo
+	StateIdFreezeProtection
+	StateIdSleep
+	StateIdFahrenheitUnit
+	StateIdFollowMe
+	StateIdPurifier
+	StateIdAuxMode  // Derived from AuxHeat/IndependentAuxHeat
+	StateIdPowerOn
+
+	// ReadOnly fields (only in StateResponse, cannot be written)
+	StateIdIndoorTemperature
+	StateIdOutdoorTemperature
+	StateIdIndoorHumidity
+	StateIdErrorCode
+	StateIdFilterAlert
+	StateIdOutdoorFanSpeed
+	StateIdDefrostActive
+	StateIdDisplayOn
+)
+
+// IsReadable returns true if the StateId can be read via GetState
+// WriteOnly fields return false
+func (s StateId) IsReadable() bool {
+	switch s {
+	case StateIdBeepOn, StateIdForceAuxHeat:
+		return false // WriteOnly
+	default:
+		return true // ReadWrite or ReadOnly
+	}
+}
+
+// IsWritable returns true if the StateId can be written via SetState
+// ReadOnly fields return false
+func (s StateId) IsWritable() bool {
+	switch s {
+	case StateIdIndoorTemperature, StateIdOutdoorTemperature, StateIdIndoorHumidity,
+		StateIdErrorCode, StateIdFilterAlert, StateIdOutdoorFanSpeed,
+		StateIdDefrostActive, StateIdDisplayOn:
+		return false // ReadOnly
+	default:
+		return true // ReadWrite or WriteOnly
+	}
+}
 
 // IsSupported checks if a property ID is supported/tested.
 func (p PropertyId) IsSupported() bool {
@@ -443,6 +503,160 @@ func NewSetStateCommand() *SetStateCommand {
 		AuxHeat:            false,
 		ForceAuxHeat:       false,
 		IndependentAuxHeat: false,
+	}
+}
+
+// FillSetStateCommandFromMap fills a SetStateCommand from a state map.
+// This is useful for applying state changes to an existing command.
+// Only WriteOnly and ReadWrite StateIds are processed (ReadOnly are ignored).
+// Returns the number of fields that were set.
+func FillSetStateCommandFromMap(cmd *SetStateCommand, stateMap map[StateId]any) (int, error) {
+	count := 0
+
+	for key, value := range stateMap {
+		// Skip ReadOnly fields (they cannot be written)
+		if !key.IsWritable() {
+			continue
+		}
+
+		var err error
+		var set bool
+		switch key {
+		case StateIdBeepOn:
+			cmd.BeepOn, err = convertToBool(value, "BeepOn")
+			set = true
+		case StateIdPowerOn:
+			cmd.PowerOn, err = convertToBool(value, "PowerOn")
+			set = true
+		case StateIdTargetTemperature:
+			cmd.TargetTemperature, err = convertToFloat64(value, "TargetTemperature")
+			set = true
+		case StateIdTargetHumidity:
+			var val float64
+			val, err = convertToFloat64(value, "TargetHumidity")
+			if err == nil {
+				cmd.TargetHumidity = byte(val)
+				set = true
+			}
+		case StateIdOperationalMode:
+			var val float64
+			val, err = convertToFloat64(value, "OperationalMode")
+			if err == nil {
+				cmd.OperationalMode = byte(val)
+				set = true
+			}
+		case StateIdFanSpeed:
+			var val float64
+			val, err = convertToFloat64(value, "FanSpeed")
+			if err == nil {
+				cmd.FanSpeed = byte(val)
+				set = true
+			}
+		case StateIdSwingMode:
+			var val float64
+			val, err = convertToFloat64(value, "SwingMode")
+			if err == nil {
+				cmd.SwingMode = byte(val)
+				set = true
+			}
+		case StateIdEco:
+			cmd.Eco, err = convertToBool(value, "Eco")
+			set = true
+		case StateIdTurbo:
+			cmd.Turbo, err = convertToBool(value, "Turbo")
+			set = true
+		case StateIdFreezeProtection:
+			cmd.FreezeProtection, err = convertToBool(value, "FreezeProtection")
+			set = true
+		case StateIdSleep:
+			cmd.Sleep, err = convertToBool(value, "Sleep")
+			set = true
+		case StateIdFahrenheitUnit:
+			cmd.Fahrenheit, err = convertToBool(value, "FahrenheitUnit")
+			set = true
+		case StateIdFollowMe:
+			cmd.FollowMe, err = convertToBool(value, "FollowMe")
+			set = true
+		case StateIdPurifier:
+			cmd.Purifier, err = convertToBool(value, "Purifier")
+			set = true
+		case StateIdAuxMode:
+			// AuxMode is derived from AuxHeat/IndependentAuxHeat
+			// AuxHeatModeOff = 0, AuxHeatModeAuxHeat = 1, AuxHeatModeAuxOnly = 2
+			var val float64
+			val, err = convertToFloat64(value, "AuxMode")
+			if err == nil {
+				switch byte(val) {
+				case 1: // AuxHeatModeAuxHeat
+					cmd.AuxHeat = true
+					cmd.IndependentAuxHeat = false
+				case 2: // AuxHeatModeAuxOnly
+					cmd.AuxHeat = false
+					cmd.IndependentAuxHeat = true
+				default: // AuxHeatModeOff
+					cmd.AuxHeat = false
+					cmd.IndependentAuxHeat = false
+				}
+				set = true
+			}
+		case StateIdForceAuxHeat:
+			cmd.ForceAuxHeat, err = convertToBool(value, "ForceAuxHeat")
+			set = true
+		}
+
+		if err != nil {
+			return count, fmt.Errorf("state %d: %w", key, err)
+		}
+		if set {
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+// toBool converts a value to bool with error context
+func convertToBool(value any, fieldName string) (bool, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		// Non-zero values are true
+		return reflect.ValueOf(value).Int() != 0, nil
+	default:
+		return false, fmt.Errorf("%s: cannot convert %T to bool", fieldName, value)
+	}
+}
+
+// toFloat64 converts a value to float64 with error context
+func convertToFloat64(value any, fieldName string) (float64, error) {
+	switch v := value.(type) {
+	case float64:
+		return v, nil
+	case float32:
+		return float64(v), nil
+	case int:
+		return float64(v), nil
+	case int8:
+		return float64(v), nil
+	case int16:
+		return float64(v), nil
+	case int32:
+		return float64(v), nil
+	case int64:
+		return float64(v), nil
+	case uint:
+		return float64(v), nil
+	case uint8:
+		return float64(v), nil
+	case uint16:
+		return float64(v), nil
+	case uint32:
+		return float64(v), nil
+	case uint64:
+		return float64(v), nil
+	default:
+		return 0, fmt.Errorf("%s: cannot convert %T to float64", fieldName, value)
 	}
 }
 
@@ -1352,6 +1566,95 @@ type StateResponse struct {
 	AuxHeat            *bool
 	IndependentAuxHeat *bool
 	ErrorCode          *byte
+}
+
+// StateKvResponse is a key-value response for state data
+// Used to simplify updateState() logic
+type StateKvResponse struct {
+	Values map[StateId]any
+}
+
+// ToKv converts StateResponse to StateKvResponse
+// This allows updateState() to handle state data in a unified way
+// convertFunc is an optional function to convert values (e.g., for type conversions)
+func (r *StateResponse) ToKv(convertFunc func(StateId, any) any) *StateKvResponse {
+	kv := &StateKvResponse{
+		Values: make(map[StateId]any),
+	}
+
+	// Helper to add value with optional conversion
+	addValue := func(key StateId, value any) {
+		if convertFunc != nil {
+			value = convertFunc(key, value)
+		}
+		kv.Values[key] = value
+	}
+
+	// Add non-nil values to the map
+	if r.PowerOn != nil {
+		addValue(StateIdPowerOn, *r.PowerOn)
+	}
+	if r.TargetTemperature != nil {
+		addValue(StateIdTargetTemperature, *r.TargetTemperature)
+	}
+	if r.OperationalMode != nil {
+		addValue(StateIdOperationalMode, *r.OperationalMode)
+	}
+	if r.FanSpeed != nil {
+		addValue(StateIdFanSpeed, *r.FanSpeed)
+	}
+	if r.SwingMode != nil {
+		addValue(StateIdSwingMode, *r.SwingMode)
+	}
+	if r.Turbo != nil {
+		addValue(StateIdTurbo, *r.Turbo)
+	}
+	if r.Eco != nil {
+		addValue(StateIdEco, *r.Eco)
+	}
+	if r.Sleep != nil {
+		addValue(StateIdSleep, *r.Sleep)
+	}
+	if r.Fahrenheit != nil {
+		addValue(StateIdFahrenheitUnit, *r.Fahrenheit)
+	}
+	if r.IndoorTemperature != nil {
+		addValue(StateIdIndoorTemperature, *r.IndoorTemperature)
+	}
+	if r.OutdoorTemperature != nil {
+		addValue(StateIdOutdoorTemperature, *r.OutdoorTemperature)
+	}
+	if r.FilterAlert != nil {
+		addValue(StateIdFilterAlert, *r.FilterAlert)
+	}
+	if r.DisplayOn != nil {
+		addValue(StateIdDisplayOn, *r.DisplayOn)
+	}
+	if r.FreezeProtection != nil {
+		addValue(StateIdFreezeProtection, *r.FreezeProtection)
+	}
+	if r.FollowMe != nil {
+		addValue(StateIdFollowMe, *r.FollowMe)
+	}
+	if r.Purifier != nil {
+		addValue(StateIdPurifier, *r.Purifier)
+	}
+	if r.TargetHumidity != nil {
+		addValue(StateIdTargetHumidity, int(*r.TargetHumidity))
+	}
+	// Aux mode logic
+	if r.IndependentAuxHeat != nil && *r.IndependentAuxHeat {
+		addValue(StateIdAuxMode, AuxHeatModeAuxOnly)
+	} else if r.AuxHeat != nil && *r.AuxHeat {
+		addValue(StateIdAuxMode, AuxHeatModeAuxHeat)
+	} else {
+		addValue(StateIdAuxMode, AuxHeatModeOff)
+	}
+	if r.ErrorCode != nil {
+		addValue(StateIdErrorCode, int(*r.ErrorCode))
+	}
+
+	return kv
 }
 
 // NewStateResponse creates a new StateResponse instance.

@@ -16,3 +16,5 @@
 /.vscode
 /config.json
 /midea.json
+*.backup_*
+/msmart/device/ac/*.bak

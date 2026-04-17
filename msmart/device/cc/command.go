@@ -47,15 +47,15 @@ const (
 	ControlIdFanSpeed          ControlId = 0x0015
 	ControlIdVertSwingAngle    ControlId = 0x001C
 	ControlIdHorzSwingAngle    ControlId = 0x001E
-	ControlIdWindSense         ControlId = 0x0020  // Untested
+	ControlIdWindSense         ControlId = 0x0020 // Untested
 	ControlIdEco               ControlId = 0x0028
 	ControlIdSilent            ControlId = 0x002A
 	ControlIdSleep             ControlId = 0x002C
-	ControlIdSelfClean         ControlId = 0x002E  // Untested
+	ControlIdSelfClean         ControlId = 0x002E // Untested
 	ControlIdPurifier          ControlId = 0x003A
 	ControlIdBeep              ControlId = 0x003F
 	ControlIdDisplay           ControlId = 0x0040
-	ControlIdAuxMode           ControlId = 0x0043  // Untested
+	ControlIdAuxMode           ControlId = 0x0043 // Untested
 )
 
 // IsKnown checks if the ControlId is a known/defined value.
@@ -232,16 +232,16 @@ func (c *ControlCommand) ToBytes() []byte {
 // Response is the base class for CC responses.
 // In Python: class Response()
 type Response struct {
-	type_    byte
-	payload  []byte
+	type_   byte
+	payload []byte
 }
 
 // NewResponse creates a new Response instance.
 // In Python: def __init__(self, payload: memoryview)
 func NewResponse(payload []byte) *Response {
 	return &Response{
-		type_:    payload[0],
-		payload:  payload,
+		type_:   payload[0],
+		payload: payload,
 	}
 }
 
@@ -269,9 +269,14 @@ func ValidateResponse(payload []byte) {
 	// TODO
 }
 
+type ResponseInterface interface {
+	Payload() []byte
+	Type() byte
+}
+
 // ConstructResponse constructs a response object from raw data.
 // In Python: @classmethod def construct(cls, frame: bytes) -> Union[ControlResponse, QueryResponse, Response]
-func ConstructResponse(frame []byte) (interface{}, error) {
+func ConstructResponse(frame []byte) (ResponseInterface, error) {
 	// Validate the frame
 	err := msmart.Validate(frame, msmart.DeviceTypeCommercialAC)
 	if err != nil {
@@ -279,11 +284,11 @@ func ConstructResponse(frame []byte) (interface{}, error) {
 	}
 
 	// Default to base class
-	var responseClass interface{}
+	var responseClass ResponseInterface
 
 	// Fetch the appropriate response class from the frame type
 	frameType := frame[9]
-	
+
 	// Validate the payload (frame[10:-1] in Python, which is frame[10:len(frame)-1] in Go)
 	ValidateResponse(frame[10 : len(frame)-1])
 
@@ -311,7 +316,7 @@ func ConstructResponse(frame []byte) (interface{}, error) {
 // In Python: class QueryResponse(Response)
 type QueryResponse struct {
 	*Response
-	
+
 	// State properties
 	PowerOn            bool
 	TargetTemperature  float64
@@ -334,23 +339,23 @@ type QueryResponse struct {
 	AuxMode            byte
 
 	// Capabilities
-	TargetTemperatureMin    float64
-	TargetTemperatureMax    float64
-	SupportsHumidity        bool
-	SupportedOpModes        []byte
-	SupportsFanSpeed        bool
-	SupportsVertSwingAngle  bool
-	SupportsHorzSwingAngle  bool
-	SupportsWindSense       bool
-	SupportsCO2Level        bool
-	SupportsEco             bool
-	SupportsSilent          bool
-	SupportsSleep           bool
-	SupportsSelfClean       bool
-	SupportsPurifier        bool
-	SupportsPurifierAuto    bool
-	SupportsFilterLevel     bool
-	SupportedAuxModes       []byte
+	TargetTemperatureMin   float64
+	TargetTemperatureMax   float64
+	SupportsHumidity       bool
+	SupportedOpModes       []byte
+	SupportsFanSpeed       bool
+	SupportsVertSwingAngle bool
+	SupportsHorzSwingAngle bool
+	SupportsWindSense      bool
+	SupportsCO2Level       bool
+	SupportsEco            bool
+	SupportsSilent         bool
+	SupportsSleep          bool
+	SupportsSelfClean      bool
+	SupportsPurifier       bool
+	SupportsPurifierAuto   bool
+	SupportsFilterLevel    bool
+	SupportedAuxModes      []byte
 }
 
 // NewQueryResponse creates a new QueryResponse instance.
@@ -358,7 +363,7 @@ type QueryResponse struct {
 func NewQueryResponse(payload []byte) (*QueryResponse, error) {
 	r := &QueryResponse{
 		Response: NewResponse(payload),
-		
+
 		// Initialize with defaults
 		PowerOn:           false,
 		TargetTemperature: 24,
@@ -370,7 +375,7 @@ func NewQueryResponse(payload []byte) (*QueryResponse, error) {
 		WindSense:         0,
 		Purifier:          0,
 		AuxMode:           0,
-		
+
 		TargetTemperatureMin: 17,
 		TargetTemperatureMax: 30,
 	}
@@ -438,8 +443,8 @@ func (r *QueryResponse) parse(payload []byte) error {
 	r.OperationalMode = payload[31]
 	r.FanSpeed = payload[34]
 
-	r.VertSwingAngle = payload[41]  // Replicated at payload[36]?
-	r.HorzSwingAngle = payload[43]  // Not replicated?
+	r.VertSwingAngle = payload[41] // Replicated at payload[36]?
+	r.HorzSwingAngle = payload[43] // Not replicated?
 
 	// Wind sense: 0 - "Close", 1 - Follow, 2 - Avoid, 3 - Soft, 4 - Strong
 	r.WindSense = payload[45]
@@ -450,7 +455,7 @@ func (r *QueryResponse) parse(payload []byte) error {
 	r.Silent = payload[58] != 0
 	r.Sleep = payload[60] != 0
 
-	r.Purifier = payload[75]  // 0 - Auto, 1 - On, 2 - Off
+	r.Purifier = payload[75] // 0 - Auto, 1 - On, 2 - Off
 
 	r.Beep = payload[80] != 0
 	r.Display = payload[81] != 0
@@ -474,7 +479,7 @@ func (r *QueryResponse) ParseCapabilities() {
 	r.TargetTemperatureMin = r.parseTemperature(payload[9])
 	r.TargetTemperatureMax = r.parseTemperature(payload[10])
 
-	r.SupportsHumidity = payload[23] != 0  // TODO unverified
+	r.SupportsHumidity = payload[23] != 0 // TODO unverified
 
 	// Supported operational modes (bytes 26-30)
 	r.SupportedOpModes = make([]byte, 0)
@@ -497,12 +502,12 @@ func (r *QueryResponse) ParseCapabilities() {
 	r.SupportsSilent = payload[57] != 0
 	r.SupportsSleep = payload[59] != 0
 
-	r.SupportsSelfClean = payload[61] != 0  // TODO unverified
+	r.SupportsSelfClean = payload[61] != 0 // TODO unverified
 
 	r.SupportsPurifier = payload[73] != 0
-	r.SupportsPurifierAuto = payload[74] != 0  // TODO unverified
+	r.SupportsPurifierAuto = payload[74] != 0 // TODO unverified
 
-	r.SupportsFilterLevel = payload[78] != 0  // TODO unverified
+	r.SupportsFilterLevel = payload[78] != 0 // TODO unverified
 
 	supportsAuxHeat := payload[82] != 0
 	if supportsAuxHeat {

@@ -684,21 +684,16 @@ func (ac *CommercialAirConditioner) updateCapabilities(res *QueryResponse) {
 	}
 }
 
+type CommandInterface interface {
+	ToBytes() []byte
+}
+
 // sendCommandsGetResponses sends a list of commands and return all valid responses.
 // In Python: async def _send_commands_get_responses(self, commands: Union[Command, list[Command]]) -> list[Response]
-func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context, commands []interface{}) ([]interface{}, error) {
+func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context, commands ...CommandInterface) ([]ResponseInterface, error) {
 	var responses [][]byte
-
 	for _, cmd := range commands {
-		var data []byte
-		switch c := cmd.(type) {
-		case *QueryCommand:
-			data = c.ToBytes()
-		case *ControlCommand:
-			data = c.ToBytes()
-		default:
-			continue
-		}
+		var data = cmd.ToBytes()
 
 		// Send command using the device's LAN connection
 		resp, err := ac.Device.SendBytes(ctx, data)
@@ -712,7 +707,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 	// Device is online if any response received
 	ac.Device.SetOnline(len(responses) > 0)
 
-	var validResponses []interface{}
+	var validResponses []ResponseInterface
 	for _, data := range responses {
 		// Construct response from data
 		response, err := ConstructResponse(data)
@@ -737,7 +732,7 @@ func (ac *CommercialAirConditioner) sendCommandsGetResponses(ctx context.Context
 func (ac *CommercialAirConditioner) GetCapabilities(ctx context.Context) error {
 	// Capabilities are part of query response
 	cmd := NewQueryCommand()
-	responses, err := ac.sendCommandsGetResponses(ctx, []interface{}{cmd})
+	responses, err := ac.sendCommandsGetResponses(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -768,7 +763,7 @@ func (ac *CommercialAirConditioner) GetCapabilities(ctx context.Context) error {
 // In Python: async def refresh(self) -> None
 func (ac *CommercialAirConditioner) Refresh(ctx context.Context) error {
 	// Always request state updates
-	commands := []interface{}{NewQueryCommand()}
+	commands := NewQueryCommand()
 
 	// Send all commands and collect responses
 	responses, err := ac.sendCommandsGetResponses(ctx, commands)
@@ -873,7 +868,7 @@ func (ac *CommercialAirConditioner) Apply(ctx context.Context) error {
 	}
 
 	// If powering off device, only send the power control
-	var commands []interface{}
+	var commands *ControlCommand
 	if power, ok := controls[ControlIdPower]; ok && !power.(bool) {
 		if len(controls) > 1 {
 			// Log dropped controls
@@ -886,9 +881,9 @@ func (ac *CommercialAirConditioner) Apply(ctx context.Context) error {
 			logger.Warn("Device powering off. Dropped additional control updates",
 				"id", ac.Device.GetID(), "dropped", dropped)
 		}
-		commands = []interface{}{NewControlCommand(map[ControlId]interface{}{ControlIdPower: false})}
+		commands = NewControlCommand(map[ControlId]interface{}{ControlIdPower: false})
 	} else {
-		commands = []interface{}{NewControlCommand(controls)}
+		commands = NewControlCommand(controls)
 	}
 
 	// Process any state responses from the device

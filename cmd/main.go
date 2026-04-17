@@ -1070,8 +1070,8 @@ func printACState(acDevice xc.XCDevice) {
 	state := ACState{
 		Power:              acDevice.PowerState(),
 		TargetTemperature:  acDevice.TargetTemperature(),
-		IndoorTemperature:  valPtrMust(acDevice.IndoorTemperature()),
-		OutdoorTemperature: valPtrMust(acDevice.OutdoorTemperature()),
+		IndoorTemperature:  acDevice.IndoorTemperature(),
+		OutdoorTemperature: acDevice.OutdoorTemperature(),
 		Mode:               modeName,
 		FanSpeed:           fanName,
 		SwingMode:          swingName,
@@ -1246,6 +1246,10 @@ func handleSet(ctx context.Context, configPath string, flags *GlobalFlags, devic
 	if err != nil {
 		return err
 	}
+	
+	// Debug: output actual type
+	slog.Info("调试: 设备信息", "type", reflect.TypeOf(dev), "value", reflect.ValueOf(dev), "isNil", dev == nil)
+	
 	acDevice, ok := dev.(xc.XCDevice)
 	if !ok {
 		slog.Error("设备不支持空调控制", "type", reflect.TypeOf(dev))
@@ -1377,15 +1381,15 @@ func printSpecificAttribute(acDevice ac.AC, key string) error {
 		slog.Info("目标温度", "value", fmt.Sprintf("%.0f°C", acDevice.TargetTemperature()))
 
 	case "indoor_temp", "indoor_temperature":
-		if temp := acDevice.IndoorTemperature(); temp > 0 {
-			slog.Info("室内温度", "value", fmt.Sprintf("%.1f°C", temp))
+		if temp := acDevice.IndoorTemperature(); temp != nil && *temp > 0 {
+			slog.Info("室内温度", "value", fmt.Sprintf("%.1f°C", *temp))
 		} else {
 			slog.Warn("室内温度不可用")
 		}
 
 	case "outdoor_temp", "outdoor_temperature":
-		if temp := acDevice.OutdoorTemperature(); temp > 0 {
-			slog.Info("室外温度", "value", fmt.Sprintf("%.1f°C", temp))
+		if temp := acDevice.OutdoorTemperature(); temp != nil && *temp > 0 {
+			slog.Info("室外温度", "value", fmt.Sprintf("%.1f°C", *temp))
 		} else {
 			slog.Warn("室外温度不可用")
 		}

@@ -105,12 +105,7 @@ func (SwingAngle) Values() []SwingAngle {
 
 // GetFromValue returns the SwingAngle for a given value, or the default if not found
 func (SwingAngle) GetFromValue(value int) SwingAngle {
-	for _, sa := range SwingAngle(0).Values() {
-		if int(sa) == value {
-			return sa
-		}
-	}
-	return SwingAngleDefault
+	return msmart.EnumFromInt(value, SwingAngle(0).Values(), SwingAngleDefault)
 }
 
 // GetFromName returns the SwingAngle for a given name, or the default if not found
@@ -587,53 +582,15 @@ func (Capability) GetFromName(name string) Capability {
 type AirConditioner struct {
 	Device *msmart.DeviceBase
 
-	// Basic controls
-	beepOn            bool
-	powerState        *bool
-	targetTemperature float64
-	targetHumidity    int
-
-	operationalMode xc.OperationalMode
-	fanSpeed        xc.FanSpeed // FanSpeed or int for custom speeds
-	swingMode       xc.SwingMode
-
-	eco              bool
-	turbo            bool
-	freezeProtection bool
-	sleep            bool
-
-	fahrenheitUnit bool // Display temperature in Fahrenheit
-	displayOn      *bool
-
-	// Advanced controls
-	followMe  bool
-	purifier  bool
-	ieco      bool
-	flashCool bool
-	outSilent bool
-
-	horizontalSwingAngle SwingAngle
-	verticalSwingAngle   SwingAngle
-	cascadeMode          CascadeMode
-	rateSelect           RateSelect
-	breezeMode           BreezeMode
-	auxMode              AuxHeatMode
-
-	// Sensors
-	indoorTemperature  *float64
-	indoorHumidity     *int
-	outdoorTemperature *float64
-
-	filterAlert     *bool
-	errorCode       *int
-	selfCleanActive *bool
-	defrostActive   *bool
-	outdoorFanSpeed *int
-
-	totalEnergyUsage   map[EnergyDataFormat]*float64
-	currentEnergyUsage map[EnergyDataFormat]*float64
-	realTimePowerUsage map[EnergyDataFormat]*float64
-	useBinaryEnergy    bool // Deprecated
+	// State management - unified KV maps
+	// lastKvState stores current device state from Refresh()
+	// pendingKvState stores user-set values that haven't been applied yet
+	// lastKvProp stores current device properties from Refresh()
+	// pendingKvProp stores property values that need to be updated
+	lastKvState    map[StateId]any
+	pendingKvState map[StateId]any
+	lastKvProp     map[PropertyId]any
+	pendingKvProp  map[PropertyId]any
 
 	// Capabilities
 	minTargetTemperature float64
@@ -651,14 +608,20 @@ type AirConditioner struct {
 	requestEnergyUsage bool
 	requestGroup5Data  bool
 
+	// Energy usage data
+	totalEnergyUsage   map[EnergyDataFormat]*float64
+	currentEnergyUsage map[EnergyDataFormat]*float64
+	realTimePowerUsage map[EnergyDataFormat]*float64
+	useBinaryEnergy    bool
+
 	// Supported properties
 	supportedProperties map[PropertyId]bool
-	updatedProperties   map[PropertyId]bool
 	needsRefresh        bool // Flag to indicate if Refresh() is needed before Apply()
 }
 
 var _ device.Device = (*AirConditioner)(nil)
 var _ device.DeviceAuthV3 = (*AirConditioner)(nil)
+var _ AC = (*AirConditioner)(nil)
 
 // NewAirConditioner creates a new AirConditioner instance
 // This is the Go equivalent of Python's __init__ method
@@ -666,94 +629,426 @@ func NewAirConditioner(ip string, port int, deviceID string, opts ...msmart.Devi
 	ac := &AirConditioner{
 		Device: msmart.NewBaseDevice(ip, port, deviceID, msmart.DeviceTypeAirConditioner, opts...),
 
-		// Basic controls
-		beepOn:            false,
-		powerState:        nil,
-		targetTemperature: 17.0,
-		targetHumidity:    40,
+		// State management
+		lastKvState:    make(map[StateId]any),
+		pendingKvState: make(map[StateId]any),
+		lastKvProp:     make(map[PropertyId]any),
+		pendingKvProp:  make(map[PropertyId]any),
 
-		operationalMode: xc.OperationalModeAuto,
-		fanSpeed:        xc.FanSpeedAuto,
-		swingMode:       xc.SwingModeOff,
+		// Default values
+		minTargetTemperature: 17.0,
+		maxTargetTemperature: 30.0,
 
-		eco:              false,
-		turbo:            false,
-		freezeProtection: false,
-		sleep:            false,
+		capabilities: msmart.NewCapabilityManager(0),
 
-		fahrenheitUnit: false,
-		displayOn:      nil,
+		supportedOpModes: []xc.OperationalMode{
+			xc.OperationalModeAuto,
+			xc.OperationalModeCool,
+			xc.OperationalModeDry,
+			xc.OperationalModeHeat,
+			xc.OperationalModeFanOnly,
+		},
+		supportedSwingModes: []xc.SwingMode{
+			xc.SwingModeOff,
+		},
+		supportedFanSpeeds: []interface{}{
+			xc.FanSpeedAuto,
+			xc.FanSpeedLow,
+			xc.FanSpeedMedium,
+			xc.FanSpeedHigh,
+		},
+		supportedRateSelects: []RateSelect{},
+		supportedAuxModes:    []AuxHeatMode{},
 
-		// Advanced controls
-		followMe:  false,
-		purifier:  false,
-		ieco:      false,
-		flashCool: false,
-		outSilent: false,
-
-		horizontalSwingAngle: SwingAngleOff,
-		verticalSwingAngle:   SwingAngleOff,
-		cascadeMode:          CascadeModeOff,
-		rateSelect:           RateSelectOff,
-		breezeMode:           BreezeModeOff,
-		auxMode:              AuxHeatModeOff,
-
-		// Sensors
-		indoorTemperature:  nil,
-		indoorHumidity:     nil,
-		outdoorTemperature: nil,
-
-		filterAlert:     nil,
-		errorCode:       nil,
-		selfCleanActive: nil,
-		defrostActive:   nil,
-		outdoorFanSpeed: nil,
-
-		totalEnergyUsage:   make(map[EnergyDataFormat]*float64),
-		currentEnergyUsage: make(map[EnergyDataFormat]*float64),
-		realTimePowerUsage: make(map[EnergyDataFormat]*float64),
-		useBinaryEnergy:    false,
-
-		// Capabilities
-		minTargetTemperature: 16,
-		maxTargetTemperature: 30,
-
-		capabilities: msmart.NewCapabilityManager(int64(CapabilityDefault)),
-
-		supportedOpModes:     xc.OperationalMode(0).Values(),
-		supportedSwingModes:  xc.SwingMode(0).Values(),
-		supportedFanSpeeds:   make([]interface{}, 0),
-		supportedRateSelects: []RateSelect{RateSelectOff},
-		supportedAuxModes:    []AuxHeatMode{AuxHeatModeOff},
-
-		// Misc
-		requestEnergyUsage: false,
-		requestGroup5Data:  false,
-
-		// Supported properties
 		supportedProperties: make(map[PropertyId]bool),
-		updatedProperties:   make(map[PropertyId]bool),
+		needsRefresh:        true,
 	}
 
-	// Initialize fan speeds
-	for _, fs := range xc.FanSpeed(0).Values() {
-		ac.supportedFanSpeeds = append(ac.supportedFanSpeeds, fs)
-	}
+	// Initialize default lastState values
+	ac.lastKvState[StateIdBeepOn] = false
+	ac.lastKvState[StateIdTargetTemperature] = 17.0
+	ac.lastKvState[StateIdTargetHumidity] = 40
+	ac.lastKvState[StateIdOperationalMode] = xc.OperationalModeAuto
+	ac.lastKvState[StateIdFanSpeed] = xc.FanSpeedAuto
+	ac.lastKvState[StateIdSwingMode] = xc.SwingModeOff
+	ac.lastKvState[StateIdEco] = false
+	ac.lastKvState[StateIdTurbo] = false
+	ac.lastKvState[StateIdFreezeProtection] = false
+	ac.lastKvState[StateIdSleep] = false
+	ac.lastKvState[StateIdFahrenheitUnit] = false
+	ac.lastKvState[StateIdFollowMe] = false
+	ac.lastKvState[StateIdPurifier] = false
 
-	// Initialize supported capability overrides
-	// This is the Go equivalent of Python's _SUPPORTED_CAPABILITY_OVERRIDES
-	ac.Device.SetSupportedCapabilityOverrides(map[string]msmart.CapabilityOverrideInfo{
-		"min_target_temperature":  {AttrName: "minTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
-		"max_target_temperature":  {AttrName: "maxTargetTemperature", ValueType: reflect.TypeOf(float64(0))},
-		"supported_modes":         {AttrName: "supportedOpModes", ValueType: reflect.TypeOf(xc.OperationalMode(0))},
-		"supported_swing_modes":   {AttrName: "supportedSwingModes", ValueType: reflect.TypeOf(xc.SwingMode(0))},
-		"supported_fan_speeds":    {AttrName: "supportedFanSpeeds", ValueType: reflect.TypeOf(xc.FanSpeed(0))},
-		"supported_aux_modes":     {AttrName: "supportedAuxModes", ValueType: reflect.TypeOf(AuxHeatMode(0))},
-		"supported_rate_selects":  {AttrName: "supportedRateSelects", ValueType: reflect.TypeOf(RateSelect(0))},
-		"additional_capabilities": {AttrName: "capabilities", ValueType: reflect.TypeOf(Capability(0)), IsFlag: true},
-	})
+	// Initialize property defaults in lastKvProp
+	ac.lastKvProp[PropertyIdIECO] = false
+	ac.lastKvProp[PropertyIdJetCool] = false
+	ac.lastKvProp[PropertyIdOutSilent] = false
+	ac.lastKvProp[PropertyIdSwingLrAngle] = byte(0)  // SwingAngleOff
+	ac.lastKvProp[PropertyIdSwingUdAngle] = byte(0)  // SwingAngleOff
+	ac.lastKvProp[PropertyIdCascade] = byte(0)       // CascadeModeOff
+	ac.lastKvProp[PropertyIdRateSelect] = byte(100)  // RateSelectOff
+	ac.lastKvProp[PropertyIdBreezeControl] = byte(1) // BreezeModeOff
+
+	// Initialize energy usage maps
+	ac.totalEnergyUsage = make(map[EnergyDataFormat]*float64)
+	ac.currentEnergyUsage = make(map[EnergyDataFormat]*float64)
+	ac.realTimePowerUsage = make(map[EnergyDataFormat]*float64)
 
 	return ac
+}
+
+// getState retrieves a value from the state map
+// If pendingState has the key, it returns that value instead (user-set value takes priority)
+// _getState retrieves a value from the state map (internal use, no access control)
+// For public API, use GetState which enforces read access control
+func (ac *AirConditioner) _getState(key StateId, defaultValue interface{}) interface{} {
+	// First check pendingState (user-set value takes priority)
+	if val, ok := ac.pendingKvState[key]; ok {
+		return val
+	}
+	// Then check lastState
+	if val, ok := ac.lastKvState[key]; ok {
+		return val
+	}
+	return defaultValue
+}
+
+// _setState sets a value in the pendingState map (internal use, no access control)
+// For public API, use SetState which enforces write access control
+func (ac *AirConditioner) _setState(key StateId, value interface{}) {
+	ac.pendingKvState[key] = value
+}
+
+// _getProp retrieves a value from the property map (internal use)
+// For public API, use GetProperty
+func (ac *AirConditioner) _getProp(key PropertyId, defaultValue any) any {
+	// First check pendingKvProp (user-set value takes priority)
+	if val, ok := ac.pendingKvProp[key]; ok {
+		return val
+	}
+	// Then check lastKvProp
+	if val, ok := ac.lastKvProp[key]; ok {
+		return val
+	}
+	return defaultValue
+}
+
+// _setProp sets a value in the pendingKvProp map (internal use)
+// For public API, use SetProperty
+func (ac *AirConditioner) _setProp(key PropertyId, value any) {
+	ac.pendingKvProp[key] = value
+}
+
+// GetState retrieves a value from the state map (public API with read access control)
+// Returns ErrStateNotReadable if the StateId is WriteOnly
+func (ac *AirConditioner) GetState(key StateId) (interface{}, error) {
+	if !key.IsReadable() {
+		return nil, fmt.Errorf("state %d is not readable (WriteOnly)", key)
+	}
+	return ac._getState(key, nil), nil
+}
+
+// SetState sets a value in the pending state map (public API with write access control)
+// Returns ErrStateNotWritable if the StateId is ReadOnly
+func (ac *AirConditioner) SetState(key StateId, value interface{}) error {
+	if !key.IsWritable() {
+		return fmt.Errorf("state %d is not writable (ReadOnly)", key)
+	}
+	ac._setState(key, value)
+	return nil
+}
+
+// GetProperty retrieves a value from the property map (public API)
+func (ac *AirConditioner) GetProperty(key PropertyId) (any, error) {
+	return ac._getProp(key, nil), nil
+}
+
+// SetProperty sets a value in the pending property map (public API)
+func (ac *AirConditioner) SetProperty(key PropertyId, value any) error {
+	ac._setProp(key, value)
+	return nil
+}
+
+// commitState moves pendingState values to lastState and clears pendingState
+// This is called after Apply() succeeds
+func (ac *AirConditioner) commitState() {
+	for k, v := range ac.pendingKvState {
+		ac.lastKvState[k] = v
+	}
+	ac.pendingKvState = make(map[StateId]any)
+	ac.pendingKvProp = make(map[PropertyId]any)
+}
+
+// updateStateFromResponse updates lastState map from a device response
+func (ac *AirConditioner) updateStateFromResponse(key StateId, value interface{}) {
+	ac.lastKvState[key] = value
+}
+
+func (ac *AirConditioner) updatePropFromResponse(key PropertyId, value any) {
+	ac.lastKvProp[key] = value
+}
+
+// Get methods - read from state map
+
+func (ac *AirConditioner) BeepOn() bool {
+	return ac._getState(StateIdBeepOn, false).(bool)
+}
+
+func (ac *AirConditioner) PowerOn() *bool {
+	if val := ac._getState(StateIdPowerOn, nil); val != nil {
+		if b, ok := val.(bool); ok {
+			return &b
+		}
+	}
+	return nil
+}
+
+func (ac *AirConditioner) PowerState() bool {
+	if val := ac.PowerOn(); val != nil {
+		return *val
+	}
+	return false
+}
+
+func (ac *AirConditioner) TargetTemperature() float64 {
+	return ac._getState(StateIdTargetTemperature, 17.0).(float64)
+}
+
+func (ac *AirConditioner) TargetHumidity() int {
+	return ac._getState(StateIdTargetHumidity, 40).(int)
+}
+
+func (ac *AirConditioner) OperationalMode() xc.OperationalMode {
+	return ac._getState(StateIdOperationalMode, xc.OperationalModeAuto).(xc.OperationalMode)
+}
+
+func (ac *AirConditioner) FanSpeed() xc.FanSpeed {
+	return ac._getState(StateIdFanSpeed, xc.FanSpeedAuto).(xc.FanSpeed)
+}
+
+func (ac *AirConditioner) SwingMode() xc.SwingMode {
+	return ac._getState(StateIdSwingMode, xc.SwingModeOff).(xc.SwingMode)
+}
+
+func (ac *AirConditioner) Eco() bool {
+	return ac._getState(StateIdEco, false).(bool)
+}
+
+func (ac *AirConditioner) Turbo() bool {
+	return ac._getState(StateIdTurbo, false).(bool)
+}
+
+func (ac *AirConditioner) FreezeProtection() bool {
+	return ac._getState(StateIdFreezeProtection, false).(bool)
+}
+
+func (ac *AirConditioner) Sleep() bool {
+	return ac._getState(StateIdSleep, false).(bool)
+}
+
+func (ac *AirConditioner) FahrenheitUnit() bool {
+	return ac._getState(StateIdFahrenheitUnit, false).(bool)
+}
+
+func (ac *AirConditioner) DisplayOn() *bool {
+	if val := ac._getState(StateIdDisplayOn, nil); val != nil {
+		if b, ok := val.(bool); ok {
+			return &b
+		}
+	}
+	return nil
+}
+
+func (ac *AirConditioner) FollowMe() bool {
+	return ac._getState(StateIdFollowMe, false).(bool)
+}
+
+func (ac *AirConditioner) Purifier() bool {
+	return ac._getState(StateIdPurifier, false).(bool)
+}
+
+func (ac *AirConditioner) Ieco() bool {
+	if val := ac._getProp(PropertyIdIECO, false); val != nil {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+func (ac *AirConditioner) FlashCool() bool {
+	if val := ac._getProp(PropertyIdJetCool, false); val != nil {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+		if b, ok := val.(byte); ok {
+			return b != 0
+		}
+	}
+	return false
+}
+
+func (ac *AirConditioner) OutSilent() bool {
+	if val := ac._getProp(PropertyIdOutSilent, false); val != nil {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+		if b, ok := val.(byte); ok {
+			return b != 0
+		}
+	}
+	return false
+}
+
+func (ac *AirConditioner) HorizontalSwingAngle() SwingAngle {
+	if val := ac._getProp(PropertyIdSwingLrAngle, byte(0)); val != nil {
+		if b, ok := val.(byte); ok {
+			return SwingAngle(b)
+		}
+	}
+	return SwingAngleOff
+}
+
+func (ac *AirConditioner) VerticalSwingAngle() SwingAngle {
+	if val := ac._getProp(PropertyIdSwingUdAngle, byte(0)); val != nil {
+		if b, ok := val.(byte); ok {
+			return SwingAngle(b)
+		}
+	}
+	return SwingAngleOff
+}
+
+func (ac *AirConditioner) CascadeMode() CascadeMode {
+	if val := ac._getProp(PropertyIdCascade, byte(0)); val != nil {
+		if b, ok := val.(byte); ok {
+			return CascadeMode(b)
+		}
+	}
+	return CascadeModeOff
+}
+
+func (ac *AirConditioner) RateSelect() RateSelect {
+	if val := ac._getProp(PropertyIdRateSelect, byte(100)); val != nil {
+		if b, ok := val.(byte); ok {
+			return RateSelect(b)
+		}
+	}
+	return RateSelectOff
+}
+
+func (ac *AirConditioner) BreezeMode() BreezeMode {
+	if val := ac._getProp(PropertyIdBreezeControl, byte(1)); val != nil {
+		if b, ok := val.(byte); ok {
+			return BreezeMode(b)
+		}
+	}
+	return BreezeModeOff
+}
+
+func (ac *AirConditioner) AuxMode() AuxHeatMode {
+	return ac._getState(StateIdAuxMode, AuxHeatModeOff).(AuxHeatMode)
+}
+
+func (ac *AirConditioner) IndoorTemperature() *float64 {
+	if val := ac._getState(StateIdIndoorTemperature, nil); val != nil {
+		if f, ok := val.(float64); ok {
+			return &f
+		}
+	}
+	return nil
+}
+
+func (ac *AirConditioner) IndoorHumidity() *int {
+	if val := ac._getState(StateIdIndoorHumidity, nil); val != nil {
+		if i, ok := val.(int); ok {
+			return &i
+		}
+	}
+	return nil
+}
+
+func (ac *AirConditioner) OutdoorTemperature() *float64 {
+	if val := ac._getState(StateIdOutdoorTemperature, nil); val != nil {
+		if f, ok := val.(float64); ok {
+			return &f
+		}
+	}
+	return nil
+}
+
+func (ac *AirConditioner) ErrorCode() *int {
+	if val := ac._getState(StateIdErrorCode, nil); val != nil {
+		if i, ok := val.(int); ok {
+			return &i
+		}
+	}
+	return nil
+}
+
+// Set methods - write to pendingState map
+
+func (ac *AirConditioner) SetBeepOn(beep bool) {
+	ac._setState(StateIdBeepOn, beep)
+}
+
+func (ac *AirConditioner) SetPowerOn(power bool) {
+	ac._setState(StateIdPowerOn, power)
+}
+
+func (ac *AirConditioner) SetPowerState(power bool) {
+	ac.SetPowerOn(power)
+}
+
+func (ac *AirConditioner) SetTargetTemperature(temp float64) {
+	ac._setState(StateIdTargetTemperature, temp)
+}
+
+func (ac *AirConditioner) SetOperationalMode(mode xc.OperationalMode) {
+	ac._setState(StateIdOperationalMode, mode)
+}
+
+func (ac *AirConditioner) SetFanSpeed(speed xc.FanSpeed) {
+	ac._setState(StateIdFanSpeed, speed)
+}
+
+func (ac *AirConditioner) SetSwingMode(mode xc.SwingMode) {
+	ac._setState(StateIdSwingMode, mode)
+}
+
+func (ac *AirConditioner) SetEco(eco bool) {
+	ac._setState(StateIdEco, eco)
+}
+
+func (ac *AirConditioner) SetTurbo(turbo bool) {
+	ac._setState(StateIdTurbo, turbo)
+}
+
+func (ac *AirConditioner) SetFreezeProtection(fp bool) {
+	ac._setState(StateIdFreezeProtection, fp)
+}
+
+func (ac *AirConditioner) SetSleep(sleep bool) {
+	ac._setState(StateIdSleep, sleep)
+}
+
+func (ac *AirConditioner) SetFahrenheitUnit(f bool) {
+	ac._setState(StateIdFahrenheitUnit, f)
+}
+
+func (ac *AirConditioner) SetHorizontalSwingAngle(angle SwingAngle) {
+	ac._setProp(PropertyIdSwingLrAngle, byte(angle))
+}
+
+func (ac *AirConditioner) SetVerticalSwingAngle(angle SwingAngle) {
+	ac._setProp(PropertyIdSwingUdAngle, byte(angle))
+}
+
+func (ac *AirConditioner) SetCascadeMode(mode CascadeMode) {
+	ac._setProp(PropertyIdCascade, byte(mode))
+}
+
+func (ac *AirConditioner) SetFlashCool(fc bool) {
+	ac._setProp(PropertyIdJetCool, fc)
 }
 
 // updateState updates the local state from a device state response
@@ -763,111 +1058,56 @@ func (ac *AirConditioner) updateState(res ResponseInterface) {
 	case *StateResponse:
 		slog.Debug("State response payload from device", "id", ac.GetID(), "response", r)
 
-		ac.powerState = r.PowerOn
-		ac.targetTemperature = ptrToVal(r.TargetTemperature, ac.targetTemperature)
-		ac.operationalMode = xc.OperationalMode(0).GetFromValue(int(ptrToVal(r.OperationalMode, byte(ac.operationalMode))))
+		// Convert to KV format
+		kv := r.ToKv(nil)
 
-		if ac.supportsCustomFanSpeed() {
-			// Attempt to use fan speed enum, but fallback to raw int if custom
-			ac.fanSpeed = xc.FanSpeed(ptrToVal(r.FanSpeed, byte(xc.FanSpeedAuto)))
-		} else {
-			ac.fanSpeed = xc.FanSpeed(0).GetFromValue(int(ptrToVal(r.FanSpeed, byte(xc.FanSpeedAuto))))
+		// Process special conversions
+		for key, value := range kv.Values {
+			switch key {
+			case StateIdOperationalMode:
+				if b, ok := value.(byte); ok {
+					value = xc.OperationalMode(0).GetFromValue(int(b))
+				}
+			case StateIdFanSpeed:
+				if b, ok := value.(byte); ok {
+					if ac.supportsCustomFanSpeed() {
+						value = xc.FanSpeed(b)
+					} else {
+						value = xc.FanSpeed(0).GetFromValue(int(b))
+					}
+				}
+			case StateIdSwingMode:
+				if b, ok := value.(byte); ok {
+					value = xc.SwingMode(0).GetFromValue(int(b))
+				}
+			case StateIdEco, StateIdTurbo, StateIdFreezeProtection, StateIdSleep, StateIdFollowMe, StateIdPurifier:
+				// Use current value as default if nil
+				if value == nil {
+					switch key {
+					case StateIdEco:
+						value = ac.Eco()
+					case StateIdTurbo:
+						value = ac.Turbo()
+					case StateIdFreezeProtection:
+						value = ac.FreezeProtection()
+					case StateIdSleep:
+						value = ac.Sleep()
+					case StateIdFollowMe:
+						value = ac.FollowMe()
+					case StateIdPurifier:
+						value = ac.Purifier()
+					}
+				}
+			}
+			ac.updateStateFromResponse(key, value)
 		}
-
-		ac.swingMode = xc.SwingMode(0).GetFromValue(int(ptrToVal(r.SwingMode, byte(ac.swingMode))))
-
-		ac.eco = ptrToVal(r.Eco, ac.eco)
-		ac.turbo = ptrToVal(r.Turbo, ac.turbo)
-		ac.freezeProtection = ptrToVal(r.FreezeProtection, ac.freezeProtection)
-		ac.sleep = ptrToVal(r.Sleep, ac.sleep)
-
-		ac.indoorTemperature = r.IndoorTemperature
-		ac.outdoorTemperature = r.OutdoorTemperature
-
-		ac.displayOn = r.DisplayOn
-		if r.Fahrenheit != nil {
-			ac.fahrenheitUnit = *r.Fahrenheit
-		}
-
-		ac.filterAlert = r.FilterAlert
-
-		ac.followMe = ptrToVal(r.FollowMe, ac.followMe)
-		ac.purifier = ptrToVal(r.Purifier, ac.purifier)
-
-		ac.targetHumidity = int(ptrToVal(r.TargetHumidity, byte(ac.targetHumidity)))
-
-		if r.IndependentAuxHeat != nil && *r.IndependentAuxHeat {
-			ac.auxMode = AuxHeatModeAuxOnly
-		} else if r.AuxHeat != nil && *r.AuxHeat {
-			ac.auxMode = AuxHeatModeAuxHeat
-		} else {
-			ac.auxMode = AuxHeatModeOff
-		}
-
-		ac.errorCode = bytePtrToIntPtr(r.ErrorCode)
 
 	case *PropertiesResponse:
 		slog.Debug("Properties response payload from device", "id", ac.GetID(), "response", r)
 
-		if angle := r.GetProperty(PropertyIdSwingLrAngle); angle != nil {
-			ac.horizontalSwingAngle = SwingAngle(0).GetFromValue(toInt(angle))
-		}
-
-		if angle := r.GetProperty(PropertyIdSwingUdAngle); angle != nil {
-			ac.verticalSwingAngle = SwingAngle(0).GetFromValue(toInt(angle))
-		}
-
-		if cascade := r.GetProperty(PropertyIdCascade); cascade != nil {
-			ac.cascadeMode = CascadeMode(0).GetFromValue(toInt(cascade))
-		}
-
-		if value := r.GetProperty(PropertyIdSelfClean); value != nil {
-			if b, ok := value.(bool); ok {
-				ac.selfCleanActive = &b
-			}
-		}
-
-		if rate := r.GetProperty(PropertyIdRateSelect); rate != nil {
-			ac.rateSelect = RateSelect(0).GetFromValue(toInt(rate))
-		}
-
-		// Breeze control supersedes breeze away and breezeless
-		if value := r.GetProperty(PropertyIdBreezeControl); value != nil {
-			ac.breezeMode = BreezeMode(0).GetFromValue(toInt(value))
-		} else {
-			if value := r.GetProperty(PropertyIdBreezeAway); value != nil {
-				if b, ok := value.(bool); ok && b {
-					ac.breezeMode = BreezeModeBreezeAway
-				} else {
-					ac.breezeMode = BreezeModeOff
-				}
-			}
-
-			if value := r.GetProperty(PropertyIdBreezeless); value != nil {
-				if b, ok := value.(bool); ok && b {
-					ac.breezeMode = BreezeModeBreezeless
-				} else {
-					ac.breezeMode = BreezeModeOff
-				}
-			}
-		}
-
-		if value := r.GetProperty(PropertyIdIECO); value != nil {
-			if b, ok := value.(bool); ok {
-				ac.ieco = b
-			}
-		}
-
-		if value := r.GetProperty(PropertyIdJetCool); value != nil {
-			if b, ok := value.(bool); ok {
-				ac.flashCool = b
-			}
-		}
-
-		if value := r.GetProperty(PropertyIdOutSilent); value != nil {
-			if b, ok := value.(bool); ok {
-				ac.outSilent = b
-			}
+		// Store all properties directly to lastKvProp
+		for propId, value := range r.properties {
+			ac.updatePropFromResponse(propId, value)
 		}
 
 	case *EnergyUsageResponse:
@@ -883,9 +1123,15 @@ func (ac *AirConditioner) updateState(res ResponseInterface) {
 	case *Group5Response:
 		slog.Debug("Group 5 response payload from device", "id", ac.GetID(), "response", r)
 
-		ac.indoorHumidity = bytePtrToIntPtr(r.Humidity)
-		ac.outdoorFanSpeed = bytePtrToIntPtr(r.OutdoorFanSpeed)
-		ac.defrostActive = r.Defrost
+		if r.Humidity != nil {
+			ac.updateStateFromResponse(StateIdIndoorHumidity, int(*r.Humidity))
+		}
+		if r.OutdoorFanSpeed != nil {
+			ac.updateStateFromResponse(StateIdOutdoorFanSpeed, int(*r.OutdoorFanSpeed))
+		}
+		if r.Defrost != nil {
+			ac.updateStateFromResponse(StateIdDefrostActive, *r.Defrost)
+		}
 
 	default:
 		slog.Debug("Ignored unknown response from device", "id", ac.GetID(), "response", res)
@@ -1066,12 +1312,7 @@ func (ac *AirConditioner) sendCommandsGetResponses(ctx context.Context, commands
 
 	for _, cmd := range commands {
 		// Get command bytes
-		var data []byte
-		if c, ok := cmd.(interface{ ToBytes() []byte }); ok {
-			data = c.ToBytes()
-		} else {
-			continue
-		}
+		data := cmd.ToBytes()
 
 		// Send command
 		responses, err := ac.SendBytes(ctx, data)
@@ -1171,7 +1412,7 @@ func (ac *AirConditioner) ToggleDisplay(ctx context.Context) error {
 
 	// Send the command and ignore all responses
 	cmd := NewToggleDisplayCommand()
-	cmd.BeepOn = ac.beepOn
+	cmd.BeepOn = ac.BeepOn()
 	_, err := ac.sendCommandsGetResponses(ctx, []CommandInterface{cmd})
 	if err != nil {
 		return err
@@ -1242,7 +1483,7 @@ func (ac *AirConditioner) applyProperties(ctx context.Context, properties map[Pr
 	}
 
 	// Always add buzzer property
-	properties[PropertyIdBuzzer] = ac.beepOn
+	properties[PropertyIdBuzzer] = ac.BeepOn()
 
 	// Build command with properties
 	cmd := NewSetPropertiesCommand(properties)
@@ -1264,73 +1505,66 @@ func (ac *AirConditioner) applyProperties(ctx context.Context, properties map[Pr
 // This is the Go equivalent of Python's apply method
 func (ac *AirConditioner) Apply(ctx context.Context) error {
 	// Warn if trying to apply unsupported modes
-	if !msmart.Contains(ac.supportedOpModes, ac.operationalMode) {
-		slog.Warn("Device is not capable of operational mode", "id", ac.GetID(), "mode", ac.operationalMode)
+	if !msmart.Contains(ac.supportedOpModes, ac.OperationalMode()) {
+		slog.Warn("Device is not capable of operational mode", "id", ac.GetID(), "mode", ac.OperationalMode())
 	}
 
-	if !ac.supportsFanSpeed(ac.fanSpeed) && !ac.supportsCustomFanSpeed() {
-		slog.Warn("Device is not capable of fan speed", "id", ac.GetID(), "speed", ac.fanSpeed)
+	if !ac.supportsFanSpeed(ac.FanSpeed()) && !ac.supportsCustomFanSpeed() {
+		slog.Warn("Device is not capable of fan speed", "id", ac.GetID(), "speed", ac.FanSpeed())
 	}
 
-	if !msmart.Contains(ac.supportedSwingModes, ac.swingMode) {
-		slog.Warn("Device is not capable of swing mode", "id", ac.GetID(), "mode", ac.swingMode)
+	if !msmart.Contains(ac.supportedSwingModes, ac.SwingMode()) {
+		slog.Warn("Device is not capable of swing mode", "id", ac.GetID(), "mode", ac.SwingMode())
 	}
 
-	if ac.turbo && !ac.SupportsTurbo() {
+	if ac.Turbo() && !ac.SupportsTurbo() {
 		slog.Warn("Device is not capable of turbo mode", "id", ac.GetID())
 	}
 
-	if ac.eco && !ac.SupportsEco() {
+	if ac.Eco() && !ac.SupportsEco() {
 		slog.Warn("Device is not capable of eco mode", "id", ac.GetID())
 	}
 
-	if ac.freezeProtection && !ac.SupportsFreezeProtection() {
+	if ac.FreezeProtection() && !ac.SupportsFreezeProtection() {
 		slog.Warn("Device is not capable of freeze protection", "id", ac.GetID())
 	}
 
-	if ac.rateSelect != RateSelectOff && !msmart.Contains(ac.supportedRateSelects, ac.rateSelect) {
-		slog.Warn("Device is not capable of rate select", "id", ac.GetID(), "rate", ac.rateSelect)
+	if ac.RateSelect() != RateSelectOff && !msmart.Contains(ac.supportedRateSelects, ac.RateSelect()) {
+		slog.Warn("Device is not capable of rate select", "id", ac.GetID(), "rate", ac.RateSelect())
 	}
 
-	if ac.auxMode != AuxHeatModeOff && !msmart.Contains(ac.supportedAuxModes, ac.auxMode) {
-		slog.Warn("Device is not capable of aux mode", "mode", ac.auxMode)
+	if ac.AuxMode() != AuxHeatModeOff && !msmart.Contains(ac.supportedAuxModes, ac.AuxMode()) {
+		slog.Warn("Device is not capable of aux mode", "mode", ac.AuxMode())
 	}
 
 	// Check if we need to refresh state before applying
 	// This is needed for properties marked as SubmitModeRefreshFirst
-	if ac.needsRefresh || ac.powerState == nil {
+	if ac.needsRefresh || ac.PowerOn() == nil {
 		if err := ac.Refresh(ctx); err != nil {
 			return err
 		}
 		ac.needsRefresh = false
+
+		// No need to call applyPendingChanges() - pending state is already in pendingState map
 	}
 
 	// If powerState is still nil after refresh, return error
 	// This prevents accidentally turning off the device
-	if ac.powerState == nil {
+	if ac.PowerOn() == nil {
 		return fmt.Errorf("failed to get device power state, cannot apply changes safely")
 	}
 
-	// Build SetStateCommand for main state
+	// Build SetStateCommand: Fill(Curr) + Fill(pending)
 	cmd := NewSetStateCommand()
-	cmd.BeepOn = ac.beepOn
-	cmd.PowerOn = ptrToVal(ac.powerState, false)
-	cmd.TargetTemperature = ac.targetTemperature
-	cmd.OperationalMode = byte(ac.operationalMode)
 
-	cmd.FanSpeed = byte(ac.fanSpeed)
+	// Fill 1: Apply current device state from lastKvState
+	FillSetStateCommandFromMap(cmd, ac.lastKvState)
 
-	cmd.SwingMode = byte(ac.swingMode)
-	cmd.Eco = ac.eco
-	cmd.Turbo = ac.turbo
-	cmd.FreezeProtection = ac.freezeProtection
-	cmd.Sleep = ac.sleep
-	cmd.Fahrenheit = ac.fahrenheitUnit
-	cmd.FollowMe = ac.followMe
-	cmd.Purifier = ac.purifier
-	cmd.TargetHumidity = byte(ac.targetHumidity)
-	cmd.AuxHeat = ac.auxMode == AuxHeatModeAuxHeat
-	cmd.IndependentAuxHeat = ac.auxMode == AuxHeatModeAuxOnly
+	// Fill 2: Apply user changes from pendingKvState (overrides current state)
+	FillSetStateCommandFromMap(cmd, ac.pendingKvState)
+
+	slog.Debug("发送设置命令", "targetTemp", cmd.TargetTemperature, "mode", cmd.OperationalMode, "fanSpeed", cmd.FanSpeed)
+	slog.Info("发送设置命令", "targetTemp", cmd.TargetTemperature, "mode", cmd.OperationalMode, "fanSpeed", cmd.FanSpeed)
 
 	// Process any state responses from the device
 	responses, err := ac.sendCommandsGetResponses(ctx, []CommandInterface{cmd})
@@ -1343,13 +1577,13 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 	}
 
 	// Done if no properties need updating
-	if len(ac.updatedProperties) == 0 {
+	if len(ac.pendingKvProp) == 0 {
 		return nil
 	}
 
-	// Build property map from updated properties using propertyMap
+	// Build property map from pending properties using propertyMap
 	props := make(map[PropertyId]interface{})
-	for prop := range ac.updatedProperties {
+	for prop := range ac.pendingKvProp {
 		if val, ok := ac.getPropertyValue(prop); ok {
 			props[prop] = val
 		}
@@ -1361,8 +1595,11 @@ func (ac *AirConditioner) Apply(ctx context.Context) error {
 		return err
 	}
 
-	// Reset updated properties set
-	ac.updatedProperties = make(map[PropertyId]bool)
+	// Reset pending properties set
+	ac.pendingKvProp = make(map[PropertyId]any)
+
+	// Clear pending state after successful apply
+	ac.pendingKvState = make(map[StateId]any)
 
 	return nil
 }
@@ -1848,39 +2085,6 @@ func parseCapabilityName(name string) (Capability, error) {
 // Property getters and setters
 // ============================================================================
 
-// Beep returns whether beep is enabled
-func (ac *AirConditioner) Beep() bool {
-	return ac.beepOn
-}
-
-// SetBeep sets whether beep is enabled
-func (ac *AirConditioner) SetBeep(tone bool) {
-	ac.beepOn = tone
-}
-
-// PowerState returns the power state
-func (ac *AirConditioner) PowerState() bool {
-	if ac.powerState != nil {
-		return *ac.powerState
-	}
-	return false
-}
-
-// SetPowerState sets the power state
-func (ac *AirConditioner) SetPowerState(state bool) {
-	ac.powerState = &state
-}
-
-// Fahrenheit returns whether Fahrenheit unit is enabled
-func (ac *AirConditioner) Fahrenheit() *bool {
-	return &ac.fahrenheitUnit
-}
-
-// SetFahrenheit sets whether Fahrenheit unit is enabled
-func (ac *AirConditioner) SetFahrenheit(enabled bool) {
-	ac.fahrenheitUnit = enabled
-}
-
 // MinTargetTemperature returns the minimum target temperature
 func (ac *AirConditioner) MinTargetTemperature() float64 {
 	return ac.minTargetTemperature
@@ -1891,45 +2095,9 @@ func (ac *AirConditioner) MaxTargetTemperature() float64 {
 	return ac.maxTargetTemperature
 }
 
-// TargetTemperature returns the target temperature
-func (ac *AirConditioner) TargetTemperature() float64 {
-	return ac.targetTemperature
-}
-
-// SetTargetTemperature sets the target temperature
-func (ac *AirConditioner) SetTargetTemperature(temp float64) {
-	ac.targetTemperature = temp
-}
-
-// IndoorTemperature returns the indoor temperature
-func (ac *AirConditioner) IndoorTemperature() float64 {
-	if ac.indoorTemperature != nil {
-		return *ac.indoorTemperature
-	}
-	return 0
-}
-
-// OutdoorTemperature returns the outdoor temperature
-func (ac *AirConditioner) OutdoorTemperature() float64 {
-	if ac.outdoorTemperature != nil {
-		return *ac.outdoorTemperature
-	}
-	return 0
-}
-
 // SupportedOperationModes returns the supported operation modes
 func (ac *AirConditioner) SupportedOperationModes() []xc.OperationalMode {
 	return ac.supportedOpModes
-}
-
-// OperationalMode returns the current operational mode
-func (ac *AirConditioner) OperationalMode() xc.OperationalMode {
-	return ac.operationalMode
-}
-
-// SetOperationalMode sets the operational mode
-func (ac *AirConditioner) SetOperationalMode(mode xc.OperationalMode) {
-	ac.operationalMode = mode
 }
 
 // SupportedFanSpeeds returns the supported fan speeds
@@ -1948,16 +2116,6 @@ func (ac *AirConditioner) SupportsCustomFanSpeed() bool {
 	return ac.supportsCustomFanSpeed()
 }
 
-// FanSpeed returns the current fan speed
-func (ac *AirConditioner) FanSpeed() xc.FanSpeed {
-	return ac.fanSpeed
-}
-
-// SetFanSpeed sets the fan speed
-func (ac *AirConditioner) SetFanSpeed(speed xc.FanSpeed) {
-	ac.fanSpeed = speed
-}
-
 // supportsFanSpeed checks if a fan speed is supported
 func (ac *AirConditioner) supportsFanSpeed(speed interface{}) bool {
 	for _, s := range ac.supportedFanSpeeds {
@@ -1974,48 +2132,10 @@ func (ac *AirConditioner) SupportsBreezeAway() bool {
 	return caps.Has(CapabilityBreezeAway) || caps.Has(CapabilityBreezeControl)
 }
 
-// BreezeAway returns whether breeze away is enabled
-func (ac *AirConditioner) BreezeAway() *bool {
-	result := ac.breezeMode == BreezeModeBreezeAway
-	return &result
-}
-
-// SetBreezeAway sets whether breeze away is enabled
-func (ac *AirConditioner) SetBreezeAway(enable bool) {
-	if enable {
-		ac.breezeMode = BreezeModeBreezeAway
-	} else {
-		ac.breezeMode = BreezeModeOff
-	}
-
-	caps := Capability(ac.capabilities.Flags())
-	if caps.Has(CapabilityBreezeControl) {
-		ac.updatedProperties[PropertyIdBreezeControl] = true
-	} else {
-		ac.updatedProperties[PropertyIdBreezeAway] = true
-	}
-}
-
 // SupportsBreezeMild returns whether breeze mild is supported
 func (ac *AirConditioner) SupportsBreezeMild() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityBreezeControl)
-}
-
-// BreezeMild returns whether breeze mild is enabled
-func (ac *AirConditioner) BreezeMild() *bool {
-	result := ac.breezeMode == BreezeModeBreezeMild
-	return &result
-}
-
-// SetBreezeMild sets whether breeze mild is enabled
-func (ac *AirConditioner) SetBreezeMild(enable bool) {
-	if enable {
-		ac.breezeMode = BreezeModeBreezeMild
-	} else {
-		ac.breezeMode = BreezeModeOff
-	}
-	ac.updatedProperties[PropertyIdBreezeControl] = true
 }
 
 // SupportsBreezeless returns whether breezeless is supported
@@ -2024,41 +2144,9 @@ func (ac *AirConditioner) SupportsBreezeless() bool {
 	return caps.Has(CapabilityBreezeless) || caps.Has(CapabilityBreezeControl)
 }
 
-// Breezeless returns whether breezeless is enabled
-func (ac *AirConditioner) Breezeless() *bool {
-	result := ac.breezeMode == BreezeModeBreezeless
-	return &result
-}
-
-// SetBreezeless sets whether breezeless is enabled
-func (ac *AirConditioner) SetBreezeless(enable bool) {
-	if enable {
-		ac.breezeMode = BreezeModeBreezeless
-	} else {
-		ac.breezeMode = BreezeModeOff
-	}
-
-	caps := Capability(ac.capabilities.Flags())
-	if caps.Has(CapabilityBreezeControl) {
-		ac.updatedProperties[PropertyIdBreezeControl] = true
-	} else {
-		ac.updatedProperties[PropertyIdBreezeless] = true
-	}
-}
-
 // SupportedSwingModes returns the supported swing modes
 func (ac *AirConditioner) SupportedSwingModes() []xc.SwingMode {
 	return ac.supportedSwingModes
-}
-
-// SwingMode returns the current swing mode
-func (ac *AirConditioner) SwingMode() xc.SwingMode {
-	return ac.swingMode
-}
-
-// SetSwingMode sets the swing mode
-func (ac *AirConditioner) SetSwingMode(mode xc.SwingMode) {
-	ac.swingMode = mode
 }
 
 // SupportsHorizontalSwingAngle returns whether horizontal swing angle is supported
@@ -2067,32 +2155,10 @@ func (ac *AirConditioner) SupportsHorizontalSwingAngle() bool {
 	return caps.Has(CapabilitySwingHorizontalAngle)
 }
 
-// HorizontalSwingAngle returns the horizontal swing angle
-func (ac *AirConditioner) HorizontalSwingAngle() SwingAngle {
-	return ac.horizontalSwingAngle
-}
-
-// SetHorizontalSwingAngle sets the horizontal swing angle
-func (ac *AirConditioner) SetHorizontalSwingAngle(angle SwingAngle) {
-	ac.horizontalSwingAngle = angle
-	ac.updatedProperties[PropertyIdSwingLrAngle] = true
-}
-
 // SupportsVerticalSwingAngle returns whether vertical swing angle is supported
 func (ac *AirConditioner) SupportsVerticalSwingAngle() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilitySwingVerticalAngle)
-}
-
-// VerticalSwingAngle returns the vertical swing angle
-func (ac *AirConditioner) VerticalSwingAngle() SwingAngle {
-	return ac.verticalSwingAngle
-}
-
-// SetVerticalSwingAngle sets the vertical swing angle
-func (ac *AirConditioner) SetVerticalSwingAngle(angle SwingAngle) {
-	ac.verticalSwingAngle = angle
-	ac.updatedProperties[PropertyIdSwingUdAngle] = true
 }
 
 // SupportsCascade returns whether cascade is supported
@@ -2101,31 +2167,10 @@ func (ac *AirConditioner) SupportsCascade() bool {
 	return caps.Has(CapabilityCascade)
 }
 
-// CascadeMode returns the cascade mode
-func (ac *AirConditioner) CascadeMode() CascadeMode {
-	return ac.cascadeMode
-}
-
-// SetCascadeMode sets the cascade mode
-func (ac *AirConditioner) SetCascadeMode(mode CascadeMode) {
-	ac.cascadeMode = mode
-	ac.updatedProperties[PropertyIdCascade] = true
-}
-
 // SupportsEco returns whether eco mode is supported
 func (ac *AirConditioner) SupportsEco() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityEco)
-}
-
-// Eco returns whether eco mode is enabled
-func (ac *AirConditioner) Eco() bool {
-	return ac.eco
-}
-
-// SetEco sets whether eco mode is enabled
-func (ac *AirConditioner) SetEco(enabled bool) {
-	ac.eco = enabled
 }
 
 // SupportsIECO returns whether IECO is supported
@@ -2134,32 +2179,10 @@ func (ac *AirConditioner) SupportsIECO() bool {
 	return caps.Has(CapabilityIECO)
 }
 
-// IECO returns whether IECO is enabled
-func (ac *AirConditioner) IECO() bool {
-	return ac.ieco
-}
-
-// SetIECO sets whether IECO is enabled
-func (ac *AirConditioner) SetIECO(enabled bool) {
-	ac.ieco = enabled
-	ac.updatedProperties[PropertyIdIECO] = true
-}
-
 // SupportsFlashCool returns whether flash cool is supported
 func (ac *AirConditioner) SupportsFlashCool() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityJetCool)
-}
-
-// FlashCool returns whether flash cool is enabled
-func (ac *AirConditioner) FlashCool() bool {
-	return ac.flashCool
-}
-
-// SetFlashCool sets whether flash cool is enabled
-func (ac *AirConditioner) SetFlashCool(enabled bool) {
-	ac.flashCool = enabled
-	ac.updatedProperties[PropertyIdJetCool] = true
 }
 
 // SupportsTurbo returns whether turbo mode is supported
@@ -2168,50 +2191,10 @@ func (ac *AirConditioner) SupportsTurbo() bool {
 	return caps.Has(CapabilityTurbo)
 }
 
-// Turbo returns whether turbo mode is enabled
-func (ac *AirConditioner) Turbo() bool {
-	return ac.turbo
-}
-
-// SetTurbo sets whether turbo mode is enabled
-func (ac *AirConditioner) SetTurbo(enabled bool) {
-	ac.turbo = enabled
-}
-
 // SupportsFreezeProtection returns whether freeze protection is supported
 func (ac *AirConditioner) SupportsFreezeProtection() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityFreezeProtection)
-}
-
-// FreezeProtection returns whether freeze protection is enabled
-func (ac *AirConditioner) FreezeProtection() bool {
-	return ac.freezeProtection
-}
-
-// SetFreezeProtection sets whether freeze protection is enabled
-func (ac *AirConditioner) SetFreezeProtection(enabled bool) {
-	ac.freezeProtection = enabled
-}
-
-// Sleep returns whether sleep mode is enabled
-func (ac *AirConditioner) Sleep() bool {
-	return ac.sleep
-}
-
-// SetSleep sets whether sleep mode is enabled
-func (ac *AirConditioner) SetSleep(enabled bool) {
-	ac.sleep = enabled
-}
-
-// FollowMe returns whether follow me is enabled
-func (ac *AirConditioner) FollowMe() bool {
-	return ac.followMe
-}
-
-// SetFollowMe sets whether follow me is enabled
-func (ac *AirConditioner) SetFollowMe(enabled bool) {
-	ac.followMe = enabled
 }
 
 // SupportsPurifier returns whether purifier is supported
@@ -2220,36 +2203,16 @@ func (ac *AirConditioner) SupportsPurifier() bool {
 	return caps.Has(CapabilityPurifier)
 }
 
-// Purifier returns whether purifier is enabled
-func (ac *AirConditioner) Purifier() bool {
-	return ac.purifier
-}
-
-// SetPurifier sets whether purifier is enabled
-func (ac *AirConditioner) SetPurifier(enabled bool) {
-	ac.purifier = enabled
-}
-
 // SupportsDisplayControl returns whether display control is supported
 func (ac *AirConditioner) SupportsDisplayControl() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityDisplayControl)
 }
 
-// DisplayOn returns whether display is on
-func (ac *AirConditioner) DisplayOn() *bool {
-	return ac.displayOn
-}
-
 // SupportsFilterReminder returns whether filter reminder is supported
 func (ac *AirConditioner) SupportsFilterReminder() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityFilterReminder)
-}
-
-// FilterAlert returns whether filter alert is active
-func (ac *AirConditioner) FilterAlert() *bool {
-	return ac.filterAlert
 }
 
 // EnableEnergyUsageRequests returns whether energy usage requests are enabled
@@ -2283,25 +2246,10 @@ func (ac *AirConditioner) SupportsHumidity() bool {
 	return caps.Has(CapabilityHumidity)
 }
 
-// IndoorHumidity returns the indoor humidity
-func (ac *AirConditioner) IndoorHumidity() *int {
-	return ac.indoorHumidity
-}
-
 // SupportsTargetHumidity returns whether target humidity is supported
 func (ac *AirConditioner) SupportsTargetHumidity() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityTargetHumidity)
-}
-
-// TargetHumidity returns the target humidity
-func (ac *AirConditioner) TargetHumidity() int {
-	return ac.targetHumidity
-}
-
-// SetTargetHumidity sets the target humidity
-func (ac *AirConditioner) SetTargetHumidity(humidity int) {
-	ac.targetHumidity = humidity
 }
 
 // SupportsSelfClean returns whether self clean is supported
@@ -2310,48 +2258,14 @@ func (ac *AirConditioner) SupportsSelfClean() bool {
 	return caps.Has(CapabilitySelfClean)
 }
 
-// SelfCleanActive returns whether self clean is active
-func (ac *AirConditioner) SelfCleanActive() bool {
-	if ac.selfCleanActive == nil {
-		return false
-	}
-	return *ac.selfCleanActive
-}
-
 // SupportedRateSelects returns the supported rate selects
 func (ac *AirConditioner) SupportedRateSelects() []RateSelect {
 	return ac.supportedRateSelects
 }
 
-// RateSelect returns the current rate select
-func (ac *AirConditioner) RateSelect() RateSelect {
-	return ac.rateSelect
-}
-
-// SetRateSelect sets the rate select
-func (ac *AirConditioner) SetRateSelect(rate RateSelect) {
-	ac.rateSelect = rate
-	ac.updatedProperties[PropertyIdRateSelect] = true
-}
-
 // SupportedAuxModes returns the supported aux modes
 func (ac *AirConditioner) SupportedAuxModes() []AuxHeatMode {
 	return ac.supportedAuxModes
-}
-
-// AuxMode returns the current aux mode
-func (ac *AirConditioner) AuxMode() AuxHeatMode {
-	return ac.auxMode
-}
-
-// SetAuxMode sets the aux mode
-func (ac *AirConditioner) SetAuxMode(mode AuxHeatMode) {
-	ac.auxMode = mode
-}
-
-// ErrorCode returns the error code
-func (ac *AirConditioner) ErrorCode() *int {
-	return ac.errorCode
 }
 
 // EnableGroup5DataRequests returns whether group 5 data requests are enabled
@@ -2364,70 +2278,77 @@ func (ac *AirConditioner) SetEnableGroup5DataRequests(enable bool) {
 	ac.requestGroup5Data = enable
 }
 
-// DefrostActive returns whether defrost is active
-func (ac *AirConditioner) DefrostActive() *bool {
-	return ac.defrostActive
-}
-
-// OutdoorFanSpeed returns the outdoor fan speed
-func (ac *AirConditioner) OutdoorFanSpeed() *int {
-	return ac.outdoorFanSpeed
-}
-
 // SupportsOutSilent returns whether out silent is supported
 func (ac *AirConditioner) SupportsOutSilent() bool {
 	caps := Capability(ac.capabilities.Flags())
 	return caps.Has(CapabilityOutSilent)
 }
 
-// OutSilent returns whether out silent is enabled
-func (ac *AirConditioner) OutSilent() bool {
-	return ac.outSilent
-}
-
-// SetOutSilent sets whether out silent is enabled
-func (ac *AirConditioner) SetOutSilent(enabled bool) {
-	ac.outSilent = enabled
-	ac.updatedProperties[PropertyIdOutSilent] = true
-}
-
-// ToDict returns the device as a dictionary
+// ToDict returns the device state as a dictionary
 // This is the Go equivalent of Python's to_dict method
 func (ac *AirConditioner) ToDict() map[string]interface{} {
+	// Start with base device info
 	result := ac.Device.ToDict()
 
-	// Add AC-specific fields
-	result["power"] = ac.powerState
-	result["mode"] = ac.operationalMode
-	result["fan_speed"] = ac.fanSpeed
-	result["swing_mode"] = ac.swingMode
-	result["horizontal_swing_angle"] = ac.horizontalSwingAngle
-	result["vertical_swing_angle"] = ac.verticalSwingAngle
-	result["cascade_mode"] = ac.cascadeMode
-	result["target_temperature"] = ac.targetTemperature
-	result["indoor_temperature"] = ac.indoorTemperature
-	result["outdoor_temperature"] = ac.outdoorTemperature
-	result["target_humidity"] = ac.targetHumidity
-	result["indoor_humidity"] = ac.indoorHumidity
-	result["eco"] = ac.eco
-	result["turbo"] = ac.turbo
-	result["freeze_protection"] = ac.freezeProtection
-	result["sleep"] = ac.sleep
-	result["display_on"] = ac.displayOn
-	result["beep"] = ac.beepOn
-	result["fahrenheit"] = ac.fahrenheitUnit
-	result["filter_alert"] = ac.filterAlert
-	result["follow_me"] = ac.followMe
-	result["purifier"] = ac.purifier
-	result["self_clean"] = ac.SelfCleanActive()
-	result["total_energy_usage"] = ac.GetTotalEnergyUsage(EnergyDataFormatBCD)
-	result["current_energy_usage"] = ac.GetCurrentEnergyUsage(EnergyDataFormatBCD)
-	result["real_time_power_usage"] = ac.GetRealTimePowerUsage(EnergyDataFormatBCD)
-	result["rate_select"] = ac.rateSelect
-	result["aux_mode"] = ac.auxMode
-	result["error_code"] = ac.errorCode
-	result["defrost"] = ac.defrostActive
-	result["out_silent"] = ac.outSilent
+	// Basic state
+	if powerOn := ac.PowerOn(); powerOn != nil {
+		result["power_on"] = *powerOn
+	}
+	result["target_temperature"] = ac.TargetTemperature()
+	result["operational_mode"] = ac.OperationalMode()
+	result["fan_speed"] = ac.FanSpeed()
+	result["swing_mode"] = ac.SwingMode()
+
+	// Optional features
+	result["eco"] = ac.Eco()
+	result["turbo"] = ac.Turbo()
+	result["freeze_protection"] = ac.FreezeProtection()
+	result["sleep"] = ac.Sleep()
+	result["fahrenheit"] = ac.FahrenheitUnit()
+	result["follow_me"] = ac.FollowMe()
+	result["purifier"] = ac.Purifier()
+
+	// Temperatures
+	if indoorTemp := ac.IndoorTemperature(); indoorTemp != nil {
+		result["indoor_temperature"] = *indoorTemp
+	}
+	if outdoorTemp := ac.OutdoorTemperature(); outdoorTemp != nil {
+		result["outdoor_temperature"] = *outdoorTemp
+	}
+
+	// Display
+	if displayOn := ac.DisplayOn(); displayOn != nil {
+		result["display_on"] = *displayOn
+	}
+
+	// Humidity
+	if indoorHumidity := ac.IndoorHumidity(); indoorHumidity != nil {
+		result["indoor_humidity"] = *indoorHumidity
+	}
+	result["target_humidity"] = ac.TargetHumidity()
+
+	// Swing angles
+	result["horizontal_swing_angle"] = ac.HorizontalSwingAngle()
+	result["vertical_swing_angle"] = ac.VerticalSwingAngle()
+
+	// Other features
+	result["cascade_mode"] = ac.CascadeMode()
+	result["rate_select"] = ac.RateSelect()
+	result["breeze_mode"] = ac.BreezeMode()
+	result["aux_mode"] = ac.AuxMode()
+
+	// IECO and FlashCool
+	result["ieco"] = ac.Ieco()
+	result["flash_cool"] = ac.FlashCool()
+	result["out_silent"] = ac.OutSilent()
+
+	// Beep
+	result["beep_on"] = ac.BeepOn()
+
+	// Error code
+	if errorCode := ac.ErrorCode(); errorCode != nil {
+		result["error_code"] = *errorCode
+	}
 
 	return result
 }
@@ -2528,13 +2449,6 @@ func (ac *AirConditioner) EcoMode() bool {
 	return ac.Eco()
 }
 
-// SetEcoMode is deprecated. Use SetEco instead.
-// Deprecated: Use SetEco instead.
-func (ac *AirConditioner) SetEcoMode(enabled bool) {
-	msmart.Deprecated("SetEcoMode", "SetEco", "")
-	ac.SetEco(enabled)
-}
-
 // SupportsFreezeProtectionMode is deprecated. Use SupportsFreezeProtection instead.
 // Deprecated: Use SupportsFreezeProtection instead.
 func (ac *AirConditioner) SupportsFreezeProtectionMode() bool {
@@ -2549,25 +2463,11 @@ func (ac *AirConditioner) FreezeProtectionMode() bool {
 	return ac.FreezeProtection()
 }
 
-// SetFreezeProtectionMode is deprecated. Use SetFreezeProtection instead.
-// Deprecated: Use SetFreezeProtection instead.
-func (ac *AirConditioner) SetFreezeProtectionMode(enabled bool) {
-	msmart.Deprecated("SetFreezeProtectionMode", "SetFreezeProtection", "")
-	ac.SetFreezeProtection(enabled)
-}
-
 // SleepMode is deprecated. Use Sleep instead.
 // Deprecated: Use Sleep instead.
 func (ac *AirConditioner) SleepMode() bool {
 	msmart.Deprecated("SleepMode", "Sleep", "")
 	return ac.Sleep()
-}
-
-// SetSleepMode is deprecated. Use SetSleep instead.
-// Deprecated: Use SetSleep instead.
-func (ac *AirConditioner) SetSleepMode(enabled bool) {
-	msmart.Deprecated("SetSleepMode", "SetSleep", "")
-	ac.SetSleep(enabled)
 }
 
 // SupportsTurboMode is deprecated. Use SupportsTurbo instead.
@@ -2582,13 +2482,6 @@ func (ac *AirConditioner) SupportsTurboMode() bool {
 func (ac *AirConditioner) TurboMode() bool {
 	msmart.Deprecated("TurboMode", "Turbo", "")
 	return ac.Turbo()
-}
-
-// SetTurboMode is deprecated. Use SetTurbo instead.
-// Deprecated: Use SetTurbo instead.
-func (ac *AirConditioner) SetTurboMode(enabled bool) {
-	msmart.Deprecated("SetTurboMode", "SetTurbo", "")
-	ac.SetTurbo(enabled)
 }
 
 // UseAlternateEnergyFormat is deprecated. Use format argument of Get*EnergyUsage methods instead.
@@ -2715,16 +2608,16 @@ func (ac *AirConditioner) IsAuthenticated() bool {
 // propertyMap defines the mapping from PropertyId to a function that returns the property value
 // This is the Go equivalent of Python's _PROPERTY_MAP
 var propertyMap = map[PropertyId]func(*AirConditioner) interface{}{
-	PropertyIdBreezeAway:    func(ac *AirConditioner) interface{} { return ac.breezeMode == BreezeModeBreezeAway },
-	PropertyIdBreezeControl: func(ac *AirConditioner) interface{} { return ac.breezeMode },
-	PropertyIdBreezeless:    func(ac *AirConditioner) interface{} { return ac.breezeMode == BreezeModeBreezeless },
-	PropertyIdCascade:       func(ac *AirConditioner) interface{} { return ac.cascadeMode },
-	PropertyIdIECO:          func(ac *AirConditioner) interface{} { return ac.ieco },
-	PropertyIdJetCool:       func(ac *AirConditioner) interface{} { return ac.flashCool },
-	PropertyIdOutSilent:     func(ac *AirConditioner) interface{} { return ac.outSilent },
-	PropertyIdRateSelect:    func(ac *AirConditioner) interface{} { return ac.rateSelect },
-	PropertyIdSwingLrAngle:  func(ac *AirConditioner) interface{} { return ac.horizontalSwingAngle },
-	PropertyIdSwingUdAngle:  func(ac *AirConditioner) interface{} { return ac.verticalSwingAngle },
+	PropertyIdBreezeAway:    func(ac *AirConditioner) interface{} { return ac.BreezeMode() == BreezeModeBreezeAway },
+	PropertyIdBreezeControl: func(ac *AirConditioner) interface{} { return ac.BreezeMode() },
+	PropertyIdBreezeless:    func(ac *AirConditioner) interface{} { return ac.BreezeMode() == BreezeModeBreezeless },
+	PropertyIdCascade:       func(ac *AirConditioner) interface{} { return ac.CascadeMode() },
+	PropertyIdIECO:          func(ac *AirConditioner) interface{} { return ac.Ieco() },
+	PropertyIdJetCool:       func(ac *AirConditioner) interface{} { return ac.FlashCool() },
+	PropertyIdOutSilent:     func(ac *AirConditioner) interface{} { return ac.OutSilent() },
+	PropertyIdRateSelect:    func(ac *AirConditioner) interface{} { return ac.RateSelect() },
+	PropertyIdSwingLrAngle:  func(ac *AirConditioner) interface{} { return ac.HorizontalSwingAngle() },
+	PropertyIdSwingUdAngle:  func(ac *AirConditioner) interface{} { return ac.VerticalSwingAngle() },
 }
 
 // getPropertyValue returns the current value of a property
@@ -2788,3 +2681,45 @@ type CommandInterface interface {
 // 	Payload() []byte
 // 	String() string
 // }
+
+// SetBeep sets the beep state (alias for SetBeepOn to match interface)
+func (ac *AirConditioner) SetBeep(beep bool) {
+	ac.SetBeepOn(beep)
+}
+
+// SetFahrenheit sets the Fahrenheit unit display (alias for SetFahrenheitUnit to match interface)
+func (ac *AirConditioner) SetFahrenheit(f bool) {
+	ac.SetFahrenheitUnit(f)
+}
+
+// SetBreezeAway sets the breeze away mode
+func (ac *AirConditioner) SetBreezeAway(enable bool) {
+	if enable {
+		ac._setProp(PropertyIdBreezeControl, byte(BreezeModeBreezeAway))
+	} else {
+		ac._setProp(PropertyIdBreezeControl, byte(BreezeModeOff))
+	}
+}
+
+// SetBreezeMild sets the breeze mild mode
+func (ac *AirConditioner) SetBreezeMild(enable bool) {
+	if enable {
+		ac._setProp(PropertyIdBreezeControl, byte(BreezeModeBreezeMild))
+	} else {
+		ac._setProp(PropertyIdBreezeControl, byte(BreezeModeOff))
+	}
+}
+
+// SetBreezeless sets the breezeless mode
+func (ac *AirConditioner) SetBreezeless(enable bool) {
+	if enable {
+		ac._setProp(PropertyIdBreezeControl, byte(BreezeModeBreezeless))
+	} else {
+		ac._setProp(PropertyIdBreezeControl, byte(BreezeModeOff))
+	}
+}
+
+// SetIECO sets the IECO mode
+func (ac *AirConditioner) SetIECO(enable bool) {
+	ac._setProp(PropertyIdIECO, enable)
+}
