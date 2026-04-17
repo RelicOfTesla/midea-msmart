@@ -281,7 +281,7 @@ func (dl DeviceList) MarshalJSON() ([]byte, error) {
 // setupFlags 设置命令行参数
 func setupFlags(flags *GlobalFlags) {
 	// Global flags
-	pflag.StringVarP(&flags.Region, "region", "r", msmart.DefaultCloudRegion, "Cloud region (CN, US, EU)")
+	pflag.StringVarP(&flags.Region, "region", "r", msmart.DefaultCloudRegion, "Cloud region (DE, KR, US)")
 	pflag.StringVarP(&flags.DeviceType, "device_type", "d", "AC", "Device type (AC, CC)")
 	pflag.IntVarP(&flags.DeviceID, "id", "i", 0, "Device ID for V3 devices")
 	pflag.StringVarP(&flags.DeviceToken, "token", "T", "", "Auth token for V3 devices")
@@ -487,9 +487,16 @@ midea - 美的空调控制 CLI v` + version + `
   -v, --verbose        显示详细调试日志
   --region <地区>      云端服务地区 (DE, KR, US), 默认: US
   --device_type <类型> 设备类型: AC (空调), CC (商业空调), 默认: AC
+  -i, --id <设备ID>    V3设备ID
+  -T, --token <token>  V3设备认证token
+  -k, --key <key>      V3设备认证key
+  -j, --json           以JSON格式输出
 
 命令:
-  discover [<host>] [--auto-connect|-a] [--count <数量>] [--account <账号> --password <密码>]
+  help                          显示帮助信息
+  version                       显示版本信息
+
+  discover [<host>] [--auto|-a] [--auto-connect|-c] [--count <数量>] [--account <账号> --password <密码>]
                                 发现设备并保存到配置
                                 <host>: 可选,指定目标设备IP (发现单个设备)
                                 --auto-connect: 自动连接并获取V3设备的token
@@ -514,7 +521,16 @@ midea - 美的空调控制 CLI v` + version + `
   set <name|id> [选项]        多参数设置 (一次设置多个属性)
   query <name|id> [key] [--all] [--auto]
                                 查询设备属性
-                                key: 属性名称 (如: temp, mode, fan, swing, power)
+                                key: 属性名称
+                                  temp/temperature/target_temp - 目标温度
+                                  indoor_temp/indoor_temperature - 室内温度
+                                  outdoor_temp/outdoor_temperature - 室外温度
+                                  mode/operational_mode - 运行模式
+                                  fan/fan_speed - 风速
+                                  swing/swing_mode - 摆风模式
+                                  power/power_state - 电源状态
+                                  eco - ECO模式
+                                  turbo - 强力模式
                                 --all: 显示所有属性 (默认)
                                 --auto: 自动发现设备并获取token
   download <host> [--account <账号> --password <密码>]
@@ -555,6 +571,18 @@ set命令选项:
   # 多参数设置 (一次命令设置多个属性)
   midea set 客厅 --temp 26 --mode cool --fan high
   midea set 客厅 --power on --temp 24
+
+  # 查询设备属性
+  midea query 客厅                  # 显示所有属性
+  midea query 客厅 temp             # 查询目标温度
+  midea query 客厅 indoor_temp      # 查询室内温度
+  midea query 客厅 outdoor_temp     # 查询室外温度
+  midea query 客厅 mode             # 查询运行模式
+  midea query 客厅 fan              # 查询风速
+  midea query 客厅 swing            # 查询摆风模式
+  midea query 客厅 power            # 查询电源状态
+  midea query 客厅 eco              # 查询ECO模式
+  midea query 客厅 turbo            # 查询强力模式
 
   # 下载设备协议和插件
   midea download 192.168.1.60 --account your@email.com --password yourpass
