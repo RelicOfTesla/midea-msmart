@@ -1056,7 +1056,7 @@ func (ac *AirConditioner) SetFlashCool(fc bool) {
 func (ac *AirConditioner) updateState(res ResponseInterface) {
 	switch r := res.(type) {
 	case *StateResponse:
-		slog.Debug("State response payload from device", "id", ac.GetID(), "response", r)
+		slog.Debug("State response payload from device", "id", ac.GetID(), "response", fmt.Sprintf("%+v", r))
 
 		// Convert to KV format
 		kv := r.ToKv(nil)

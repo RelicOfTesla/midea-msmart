@@ -697,7 +697,7 @@ func (c *SetStateCommand) ToBytes() []byte {
 	}
 
 	// Get integer and fraction components of target temp
-	fractionalTemp, integralTemp := math.Modf(c.TargetTemperature)
+	integralTemp, fractionalTemp := math.Modf(c.TargetTemperature)
 	integralTempInt := int(integralTemp)
 
 	var temperature byte
@@ -786,7 +786,7 @@ func (c *SetStateCommand) ToBytes() []byte {
 		0x40,
 		// Beep and power state
 		c.controlSource | beep | power,
-		// Temperature and operational mode
+	// Temperature and operational mode
 		temperature | mode,
 		// Fan speed
 		c.FanSpeed,
