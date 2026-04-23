@@ -616,7 +616,7 @@ func DiscoverSingle(ctx context.Context, host string, config *DiscoverConfig) (d
 		}
 	}
 
-	return nil, nil
+	return nil, NewDiscoverError(fmt.Sprintf("no device found at %s", host), nil)
 }
 
 // ConnectDevice connects, authenticates as needed and refreshes a device
