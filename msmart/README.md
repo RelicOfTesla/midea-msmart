@@ -145,7 +145,7 @@ func main() {
 ## 查询设备状态
 
 ```go
-device := ac.NewAirConditioner("10.100.1.140", 6444, "15393162840672", msmart.WithVersion(3))
+device := ac.NewAirConditioner("10.100.1.140", 6444, "15393162840672")
 
 if err := device.Refresh(ctx); err != nil {
     panic(err)

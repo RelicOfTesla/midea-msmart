@@ -107,6 +107,7 @@ midea swing 客厅 vertical
 | `discover` | 发现设备 | `midea discover` |
 | `list` | 列出设备 | `midea list` |
 | `bind` | 绑定设备 | `midea bind 192.168.1.60 -n 客厅` |
+| `unbind` | 解绑设备 | `midea unbind 客厅` |
 | `status` | 查询状态 | `midea status 客厅` |
 | `on/off` | 开关机 | `midea on 客厅` |
 | `temp` | 设置温度 | `midea temp 客厅 26` |
@@ -115,6 +116,7 @@ midea swing 客厅 vertical
 | `swing` | 设置摆风 | `midea swing 客厅 vertical` |
 | `set` | 多参数设置 | `midea set 客厅 --temp 26 --mode cool` |
 | `query` | 查询属性 | `midea query 客厅 temp` |
+| `download` | 下载设备协议 | `midea download 192.168.1.60 --account your@email.com --password yourpass` |
 
 ### 参数说明
 
@@ -132,6 +134,8 @@ midea swing 客厅 vertical
 -v, --verbose           # 显示详细日志
 --region <地区>         # 云端服务地区 (DE, KR, US), 默认: US
 --device_type <类型>    # 设备类型: AC (空调), CC (商业空调), 默认: AC
+--auto, -a              # 自动发现设备并获取 V3 token（控制命令可用）
+--auto-connect, -c      # 发现时自动连接并获取 V3 token
 ```
 
 ## ⚙️ 配置
